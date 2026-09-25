@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Job Finder{% endblock %}</title>
+  <style>
+    :root{color-scheme:light;--ink:#213047;--muted:#5b6878;--line:#dce2e8;--blue:#154f80;--pale:#f4f8fb}
+    *{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Arial,sans-serif;color:var(--ink);background:#fafbfd}
+    .shell{max-width:1120px;margin:auto;padding:0 20px}header{background:#fff;border-bottom:1px solid var(--line)}
+    header .shell{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:70px;flex-wrap:wrap}
+    nav{display:flex;gap:18px;flex-wrap:wrap}a{color:var(--blue)}nav a{text-decoration:none;font-weight:600}nav a:hover{text-decoration:underline}
+    main{padding:28px 20px 60px}.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:22px;margin:0 0 18px;box-shadow:0 1px 2px #10203008}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+    h1{font-size:29px;line-height:1.2;margin:0 0 12px}h2{font-size:21px;margin:0 0 12px}h3{font-size:17px;margin:0 0 8px}p{margin:8px 0 14px}
+    .muted{color:var(--muted)}label{display:block;font-weight:650;margin:12px 0 5px}input,textarea,select{width:100%;font:inherit;color:var(--ink);padding:10px 12px;border:1px solid #adb8c5;border-radius:7px;background:#fff}
+    textarea{min-height:80px;resize:vertical}.hint{font-size:13px;color:var(--muted);margin-top:3px}button,.button{display:inline-block;width:auto;background:var(--blue);color:#fff;border:1px solid var(--blue);border-radius:7px;padding:10px 16px;font:inherit;font-weight:650;text-decoration:none;cursor:pointer}
+    button:hover,.button:hover{background:#0b3d66;color:#fff}.button.secondary,button.secondary{background:#fff;color:var(--blue)}.button.secondary:hover,button.secondary:hover{background:var(--pale)}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.pill{display:inline-block;border-radius:99px;padding:3px 9px;background:#e8f1f8;color:#245172;font-size:13px;margin:3px 3px 3px 0}
+    table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:10px 8px;vertical-align:top}th{color:var(--muted);font-weight:650}.scroll{overflow-x:auto}
+    .job{display:grid;grid-template-columns:1fr auto;gap:14px;border-top:1px solid var(--line);padding:17px 0}.job:first-of-type{border-top:0}.job h3{margin:0}.job p{margin:4px 0}.preline{white-space:pre-wrap}.notice{background:#eef6ee;border-left:4px solid #478b58;padding:12px 15px;border-radius:4px}
+    .question{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}.inline-form{display:inline}.inline-form button{padding:4px 8px;font-size:13px}
+    @media(max-width:700px){.grid,.grid3{grid-template-columns:1fr}.job{grid-template-columns:1fr}header .shell{padding-top:12px;padding-bottom:12px}main{padding-top:20px}}
+  </style>
+</head>
+<body>
+<header><div class="shell"><strong>Job Finder{% if profile_name %} · {{ profile_name }}{% endif %}</strong>
+  <nav aria-label="Main navigation"><a href="/">Search</a><a href="/profile">My profile</a><a href="/my-jobs">Jobs I opened</a><a href="/alerts">Alerts</a><a href="/activity">Activity</a></nav>
+  <form class="inline-form" method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="secondary" type="submit">Sign out</button></form>
+</div></header>
+<main class="shell">{% block content %}{% endblock %}</main>
+</body></html>

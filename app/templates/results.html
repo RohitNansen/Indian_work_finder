@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block title %}Search results · Job Finder{% endblock %}
+{% block content %}<div class="row"><div><h1>Jobs found for you</h1><p class="muted">{{ jobs|length }} jobs to review. Open a listing to see details and optional experience questions.</p></div><a class="button secondary" href="/">New search</a></div>
+{% if not jobs %}<div class="card"><p>No suitable jobs were found this time. Try a wider date range or different role names.</p></div>{% endif %}
+<div class="card">{% for job in jobs %}<div class="job"><div><h3><a href="/jobs/{{ job.id }}">{{ job.title }}</a></h3><p>{{ job.company }} · {{ job.location }}{% if job.work_type %} · {{ job.work_type }}{% endif %}</p><p class="muted">{{ job.why }}</p>{% if job.posted_at %}<small class="muted">Posted: {{ job.posted_at[:10] }}</small>{% endif %}</div><div><a class="button secondary" href="/jobs/{{ job.id }}">View job</a></div></div>{% endfor %}</div>
+{% endblock %}

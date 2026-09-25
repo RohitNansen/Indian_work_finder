@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block title %}Edit alert · Job Finder{% endblock %}
+{% block content %}<p><a href="/alerts">← Back to alerts</a></p><h1>Edit alert</h1><form class="card" method="post" action="/alerts/{{ alert.id }}/edit"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div class="grid"><div><label for="name">Alert name</label><input id="name" name="name" value="{{ alert.name }}" required></div><div><label for="email">Send to email address</label><input id="email" name="email" type="email" value="{{ alert.email }}" required></div>
+<div><label for="roles">Roles to search</label><textarea id="roles" name="roles">{{ alert.role_labels }}</textarea></div><div><label for="keywords">Other work or skills</label><textarea id="keywords" name="keywords">{{ alert.keywords }}</textarea></div>
+<div><label for="locations">Places</label><input id="locations" name="locations" value="{{ alert.locations }}"></div><div><label for="work_types">Types of work</label><input id="work_types" name="work_types" value="{{ alert.work_types }}"></div>
+<div><label for="time_ist">Send at (IST)</label><input id="time_ist" name="time_ist" type="time" value="{{ alert.time_ist }}"></div><div><label for="count">Maximum jobs per email</label><input id="count" name="count" type="number" min="1" max="50" value="{{ alert.count }}"></div>
+<div><label for="days_recent">How recent</label><select id="days_recent" name="days_recent"><option value="3" {% if alert.days_recent==3 %}selected{% endif %}>Last 3 days</option><option value="7" {% if alert.days_recent==7 %}selected{% endif %}>Last 7 days</option><option value="30" {% if alert.days_recent==30 %}selected{% endif %}>Last 30 days</option></select></div></div><p><button>Save alert</button></p></form>
+{% endblock %}

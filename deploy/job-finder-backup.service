@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up Indian Work Engine database
+
+[Service]
+Type=oneshot
+User=jobfinder
+Group=jobfinder
+WorkingDirectory=/opt/indian-work-engine
+ExecStart=/opt/indian-work-engine/.venv/bin/python -m app.backup
+NoNewPrivileges=true
