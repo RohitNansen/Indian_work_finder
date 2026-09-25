@@ -134,10 +134,14 @@ def local_quotas() -> None:
                       "AND sent_at LIKE ?", (f"{month}%",))["n"]
     quota_day = one("SELECT COUNT(*) AS n FROM quota_notifications WHERE status='sent' "
                     "AND sent_at LIKE ?", (f"{day}%",))["n"]
-    evaluate("Resend", "app emails this month", month,
-             sent_month + quota_month, settings.resend_monthly_quota)
-    evaluate("Resend", "app emails today", day,
-             sent_day + quota_day, settings.resend_daily_quota)
+    if settings.gmail_app_password:
+        record_check("Gmail SMTP", "app recipients sent today", day,
+                     sent_day + quota_day, None, None, "local count only")
+    else:
+        evaluate("Resend", "app emails this month", month,
+                 sent_month + quota_month, settings.resend_monthly_quota)
+        evaluate("Resend", "app emails today", day,
+                 sent_day + quota_day, settings.resend_daily_quota)
     # A provider 402/429 is actionable even when its account quota is not readable.
     for row in all_rows(
         "SELECT provider,http_status FROM api_calls WHERE http_status IN (402,429) "

@@ -114,6 +114,34 @@ def test_alert_due_at_ist_once_per_day(test_env, monkeypatch):
             object.__setattr__(settings, field, value)
 
 
+def test_failed_daily_alert_does_not_repeat_paid_searches(test_env, monkeypatch):
+    from app import alerts
+    aid = db.write(
+        "INSERT INTO alerts(name,email,role_labels,keywords,locations,work_types,time_ist,count,"
+        "days_recent,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("Daily", "one@example.com", "R&D", "", "Chennai", "", "08:00", 5, 7, db.utcnow()),
+    )
+    provider_fields = ("jsearch_api_key", "openrouter_api_key", "resend_api_key", "email_from")
+    originals = {field: getattr(settings, field) for field in provider_fields}
+    for field in provider_fields:
+        object.__setattr__(settings, field, "test-value")
+    attempts = []
+
+    def fail(alert):
+        attempts.append(alert["id"])
+        raise RuntimeError("mail unavailable")
+
+    monkeypatch.setattr(alerts, "run_alert", fail)
+    now = datetime(2026, 9, 25, 8, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+    try:
+        assert run_due_alerts(now) == [(aid, "failed: mail unavailable")]
+        assert run_due_alerts(now) == []
+        assert attempts == [aid]
+    finally:
+        for field, value in originals.items():
+            object.__setattr__(settings, field, value)
+
+
 def test_alert_recipients_are_editable_and_validated(client):
     recipients = "one@example.com, two@example.org"
     data = {"_csrf": csrf(client), "name": "Daily research jobs", "email": recipients,
@@ -170,6 +198,50 @@ def test_email_request_includes_both_alert_recipients(test_env, monkeypatch):
     finally:
         object.__setattr__(settings, "resend_api_key", old_key)
         object.__setattr__(settings, "email_from", old_from)
+
+
+def test_gmail_sender_uses_tls_and_both_recipients(test_env, monkeypatch):
+    from app import alerts
+    actions = []
+
+    class SMTP:
+        def __init__(self, host, port, timeout):
+            actions.append(("connect", host, port, timeout))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def starttls(self, context):
+            actions.append(("tls", bool(context)))
+
+        def login(self, username, password):
+            actions.append(("login", username, password))
+
+        def send_message(self, message, from_addr, to_addrs):
+            actions.append(("send", from_addr, to_addrs, message["To"]))
+
+    old = (settings.gmail_app_password, settings.email_from, settings.resend_api_key)
+    object.__setattr__(settings, "gmail_app_password", "test-app-password")
+    object.__setattr__(settings, "email_from", "sender@gmail.com")
+    object.__setattr__(settings, "resend_api_key", "")
+    monkeypatch.setattr(alerts.smtplib, "SMTP", SMTP)
+    try:
+        assert alerts.email_ready()
+        assert alerts.send_email(["one@example.com", "two@example.org"],
+                                 "Jobs", "<p>New jobs</p>").startswith("<")
+        assert actions[0] == ("connect", "smtp.gmail.com", 587, 30)
+        assert actions[1] == ("tls", True)
+        assert actions[2] == ("login", "sender@gmail.com", "test-app-password")
+        assert actions[3] == ("send", "sender@gmail.com",
+                              ["one@example.com", "two@example.org"],
+                              "one@example.com, two@example.org")
+    finally:
+        object.__setattr__(settings, "gmail_app_password", old[0])
+        object.__setattr__(settings, "email_from", old[1])
+        object.__setattr__(settings, "resend_api_key", old[2])
 
 
 def test_resume_evidence_keeps_employer_and_role_context(test_env):

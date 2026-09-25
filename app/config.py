@@ -32,6 +32,7 @@ class Settings:
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "google/gemini-3.8-flash")
     resend_api_key: str = os.getenv("RESEND_API_KEY", "")
+    gmail_app_password: str = os.getenv("GMAIL_APP_PASSWORD", "")
     email_from: str = os.getenv("EMAIL_FROM", "")
     quota_alert_email: str = os.getenv("QUOTA_ALERT_EMAIL", "")
     resend_daily_quota: int = int(os.getenv("RESEND_DAILY_QUOTA", "100"))

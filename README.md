@@ -14,6 +14,7 @@ The first version is deployed at `https://hithanis.com/job-finder/` and can also
 - Separate **Jobs I opened** table, with click times and manually updated application status.
 - Review proposed resume wording changes, approve each change, and download a named Word and PDF copy.
 - Create, edit, pause and resume email alerts; default five new roles at 08:00 IST.
+- Send alerts with Resend or Gmail SMTP. Gmail uses an app password in the private `.env` and needs no DNS changes.
 - Private Activity page with search parameters, returned links, provider calls, token counts, cost estimates, quota checks and delivery results.
 - Configurable OpenRouter model, spending cap and JSearch request cap.
 
@@ -30,6 +31,8 @@ cp .env.example .env
 ```
 
 Edit `.env` with a long `APP_PASSWORD` and random `APP_SECRET`. Put provider keys there only after rotating any keys shared in chat. `.env` and `data/` are ignored by Git.
+
+For free email sending from a personal Gmail address, set `EMAIL_FROM` to that address and `GMAIL_APP_PASSWORD` to a Google app password created with 2-Step Verification. Gmail takes priority if both Gmail and Resend are configured. Keep the app password out of Git and chat. The app records its own sent-recipient count; Gmail does not provide the app with a live remaining-quota API. Quota warning emails need a working sender to be delivered.
 
 ```sh
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000

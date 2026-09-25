@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS alerts (
   time_ist TEXT NOT NULL DEFAULT '08:00', count INTEGER NOT NULL DEFAULT 5,
   days_recent INTEGER NOT NULL DEFAULT 7,
   enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
-  last_sent_date_ist TEXT
+  last_sent_date_ist TEXT, last_attempt_date_ist TEXT
 );
 CREATE TABLE IF NOT EXISTS alert_jobs (
   alert_id INTEGER NOT NULL, job_id TEXT NOT NULL, sent_at TEXT NOT NULL,
@@ -166,6 +166,9 @@ def init_db(path: Path | None = None) -> None:
         email_columns = {row["name"] for row in db.execute("PRAGMA table_info(email_runs)")}
         if "recipient_count" not in email_columns:
             db.execute("ALTER TABLE email_runs ADD COLUMN recipient_count INTEGER NOT NULL DEFAULT 1")
+        alert_columns = {row["name"] for row in db.execute("PRAGMA table_info(alerts)")}
+        if "last_attempt_date_ist" not in alert_columns:
+            db.execute("ALTER TABLE alerts ADD COLUMN last_attempt_date_ist TEXT")
         db.execute("INSERT OR IGNORE INTO profile(id,updated_at) VALUES(1,?)", (utcnow(),))
 
 

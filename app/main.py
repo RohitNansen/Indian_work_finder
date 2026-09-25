@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from .ai import extract_profile, propose_resume_edits
-from .alerts import parse_recipients
+from .alerts import email_ready, parse_recipients
 from .config import settings
 from .db import all_rows, connect, init_db, one, utcnow, write
 from .evidence import store_evidence
@@ -349,8 +349,8 @@ def alerts_page(request: Request):
         return response
     return page(request, "alerts.html", alerts=all_rows("SELECT * FROM alerts ORDER BY id DESC"),
                 profile=one("SELECT * FROM profile WHERE id=1"),
-                delivery_ready=all((settings.jsearch_api_key, settings.openrouter_api_key,
-                                    settings.resend_api_key, settings.email_from)))
+                delivery_ready=bool(settings.jsearch_api_key and settings.openrouter_api_key
+                                    and email_ready()))
 
 
 @app.post("/alerts")

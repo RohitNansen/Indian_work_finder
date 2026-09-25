@@ -3,8 +3,12 @@ from __future__ import annotations
 import html
 import json
 import re
+import smtplib
+import ssl
 import sys
 from datetime import datetime
+from email.message import EmailMessage
+from email.utils import make_msgid, parseaddr
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -28,16 +32,37 @@ def parse_recipients(value: str) -> list[str]:
     return addresses
 
 
+def email_ready() -> bool:
+    return bool(settings.email_from and (settings.gmail_app_password or settings.resend_api_key))
+
+
 def send_email(to_address: str | list[str], subject: str, content: str) -> str:
-    if not settings.resend_api_key or not settings.email_from:
+    if not email_ready():
         raise RuntimeError("Email delivery is not configured yet")
+    recipients = [to_address] if isinstance(to_address, str) else to_address
+    if settings.gmail_app_password:
+        sender = parseaddr(settings.email_from)[1]
+        if not sender:
+            raise RuntimeError("EMAIL_FROM needs a valid email address")
+        message = EmailMessage()
+        message["From"] = settings.email_from
+        message["To"] = ", ".join(recipients)
+        message["Subject"] = subject
+        message["Message-ID"] = make_msgid()
+        message.set_content(html.unescape(re.sub(r"<[^>]+>", " ", content)))
+        message.add_alternative(content, subtype="html")
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as smtp:
+            smtp.starttls(context=ssl.create_default_context())
+            smtp.login(sender, settings.gmail_app_password)
+            smtp.send_message(message, from_addr=sender, to_addrs=recipients)
+        return message["Message-ID"]
     with httpx.Client(timeout=30) as client:
         response = client.post(
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {settings.resend_api_key}",
                      "Content-Type": "application/json"},
             json={"from": settings.email_from,
-                  "to": [to_address] if isinstance(to_address, str) else to_address,
+                  "to": recipients,
                   "subject": subject, "html": content},
         )
     response.raise_for_status()
@@ -98,19 +123,20 @@ def run_alert(alert) -> int:
 
 
 def run_due_alerts(now: datetime | None = None) -> list[tuple[int, str]]:
-    if not all((settings.jsearch_api_key, settings.openrouter_api_key,
-                settings.resend_api_key, settings.email_from)):
+    if not settings.jsearch_api_key or not settings.openrouter_api_key or not email_ready():
         return []
     now = (now or datetime.now(IST)).astimezone(IST)
     today, time_now = now.date().isoformat(), now.strftime("%H:%M")
     alerts = all_rows(
         "SELECT * FROM alerts WHERE enabled=1 AND time_ist<=? "
-        "AND (last_sent_date_ist IS NULL OR last_sent_date_ist<>?)",
-        (time_now, today),
+        "AND (last_sent_date_ist IS NULL OR last_sent_date_ist<>?) "
+        "AND (last_attempt_date_ist IS NULL OR last_attempt_date_ist<>?)",
+        (time_now, today, today),
     )
     outcomes = []
     for alert in alerts:
         try:
+            write("UPDATE alerts SET last_attempt_date_ist=? WHERE id=?", (today, alert["id"]))
             count = run_alert(alert)
             outcomes.append((alert["id"], f"sent {count}"))
         except Exception as exc:
