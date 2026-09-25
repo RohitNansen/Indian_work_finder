@@ -14,6 +14,7 @@ from app.main import app
 from app.evidence import evidence_matches, store_evidence
 from app.resume import apply_changes, export_variant
 from conftest import csrf
+from deploy.save_gmail_app_password import save_password
 
 
 def sample_job(title, company, suffix):
@@ -242,6 +243,16 @@ def test_gmail_sender_uses_tls_and_both_recipients(test_env, monkeypatch):
         object.__setattr__(settings, "gmail_app_password", old[0])
         object.__setattr__(settings, "email_from", old[1])
         object.__setattr__(settings, "resend_api_key", old[2])
+
+
+def test_hidden_password_helper_preserves_other_settings_and_permissions(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("JSEARCH_API_KEY=existing-key\nGMAIL_APP_PASSWORD=\n")
+    save_password(path, "abcd efgh ijkl mnop")
+    assert path.read_text() == (
+        "JSEARCH_API_KEY=existing-key\nGMAIL_APP_PASSWORD=abcdefghijklmnop\n"
+    )
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_resume_evidence_keeps_employer_and_role_context(test_env):

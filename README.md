@@ -34,6 +34,8 @@ Edit `.env` with a long `APP_PASSWORD` and random `APP_SECRET`. Put provider key
 
 For free email sending from a personal Gmail address, set `EMAIL_FROM` to that address and `GMAIL_APP_PASSWORD` to a Google app password created with 2-Step Verification. Gmail takes priority if both Gmail and Resend are configured. Keep the app password out of Git and chat. The app records its own sent-recipient count; Gmail does not provide the app with a live remaining-quota API. Quota warning emails need a working sender to be delivered.
 
+On the VM, the owner can set the app password without showing it in the terminal or shell history: run `.venv/bin/python deploy/save_gmail_app_password.py` from the repository folder, paste at the hidden prompt, and press Enter. Then restart `job-finder.service` to load the new value.
+
 ```sh
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
