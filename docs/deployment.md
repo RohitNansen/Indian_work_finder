@@ -22,6 +22,7 @@ An app password and secret were generated on the VM. The owner can view the pass
 
 Insert `deploy/nginx-job-finder-location.conf` into the existing `hithanis.com` HTTPS server block in `~/nginx/default.conf`. Preserve the existing `/vm-pos/`, `/vm-dashboard/`, root redirect, certificate, and port 80 sections exactly. Back up the original file first, test the candidate config with `nginx -t` inside the existing container, and reload Nginx only if validation succeeds. Verify all three routes after reload. The path prefix is part of `APP_BASE_URL`; the app handles prefixed links, redirects, and cookies.
 The original config was saved as `~/nginx/default.conf.before-job-finder-20260925`. The reload also activated a renewed certificate that was already on disk; the two existing routes and the new health route returned successfully over certificate-validated HTTPS.
+Certbot's renewal timer was active, but its deploy-hook folder was empty. Install `deploy/reload-nginx-after-cert-renewal.sh` there so a successful renewal validates and gracefully reloads the Docker Nginx container. This prevents it from serving an old certificate after renewal.
 
 ## Checks and limits
 
