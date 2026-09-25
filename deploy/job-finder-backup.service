@@ -3,8 +3,8 @@ Description=Back up Indian Work Engine database
 
 [Service]
 Type=oneshot
-User=jobfinder
-Group=jobfinder
-WorkingDirectory=/opt/indian-work-engine
-ExecStart=/opt/indian-work-engine/.venv/bin/python -m app.backup
+User=rsa-key-20240330
+Group=rsa-key-20240330
+WorkingDirectory=/home/rsa-key-20240330/indian-work-engine
+ExecStart=/home/rsa-key-20240330/indian-work-engine/.venv/bin/python -m app.backup
 NoNewPrivileges=true

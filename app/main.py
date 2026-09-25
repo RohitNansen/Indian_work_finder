@@ -30,6 +30,17 @@ app = FastAPI(title="Indian Work Engine", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
+@app.middleware("http")
+async def prefix_local_redirects(request: Request, call_next):
+    response = await call_next(request)
+    location = response.headers.get("location", "")
+    prefix = settings.app_base_path
+    if prefix and location.startswith("/") and not location.startswith("//") \
+            and location != prefix and not location.startswith(prefix + "/"):
+        response.headers["location"] = prefix + location
+    return response
+
+
 @app.on_event("startup")
 def startup():
     if not settings.app_password or not settings.app_secret:
@@ -80,7 +91,8 @@ async def check_post(request: Request) -> None:
 def page(request: Request, name: str, **context):
     return templates.TemplateResponse(
         request, name,
-        {"csrf": csrf_token(request), "profile_name": (one("SELECT name FROM profile WHERE id=1") or {})["name"],
+        {"csrf": csrf_token(request), "base_path": settings.app_base_path,
+         "profile_name": (one("SELECT name FROM profile WHERE id=1") or {})["name"],
          **context},
     )
 
@@ -89,19 +101,21 @@ def page(request: Request, name: str, **context):
 def login_page(request: Request):
     if authenticated(request):
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, "login.html", {"error": ""})
+    return templates.TemplateResponse(request, "login.html", {"error": "", "base_path": settings.app_base_path})
 
 
 @app.post("/login")
 def login(request: Request, password: str = Form("")):
     if not hmac.compare_digest(password, settings.app_password):
         return templates.TemplateResponse(
-            request, "login.html", {"error": "That password did not work."}, status_code=401,
+            request, "login.html", {"error": "That password did not work.",
+                                    "base_path": settings.app_base_path}, status_code=401,
         )
     response = RedirectResponse("/", status_code=303)
     response.set_cookie("work_session", session_value(), httponly=True,
                         secure=settings.app_base_url.startswith("https://"),
-                        samesite="strict", max_age=7 * 86400)
+                        samesite="strict", max_age=7 * 86400,
+                        path=settings.app_base_path or "/")
     return response
 
 
@@ -109,7 +123,7 @@ def login(request: Request, password: str = Form("")):
 async def logout(request: Request):
     await check_post(request)
     response = RedirectResponse("/login", status_code=303)
-    response.delete_cookie("work_session")
+    response.delete_cookie("work_session", path=settings.app_base_path or "/")
     return response
 
 

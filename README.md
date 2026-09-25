@@ -21,7 +21,7 @@ The app never submits an application on the person's behalf. Opening a link is r
 
 ## Local setup
 
-Use Python 3.12 or newer.
+Use Python 3.11 or newer.
 
 ```sh
 python3 -m venv .venv
@@ -44,7 +44,7 @@ The initial model is `google/gemini-3.8-flash`. `app.evaluate` compares it with 
 
 ## Deployment
 
-See [GCP VM deployment](docs/deployment.md). The app is designed for one Uvicorn worker behind HTTPS on the existing 1 GB Linux VM. SQLite files, uploads and exports live in a private persistent folder. Keep an off-VM backup.
+See [GCP VM deployment](docs/deployment.md). The app is designed for one Uvicorn worker behind the existing HTTPS Nginx server at `/job-finder/` on the 1 GB Linux VM. SQLite files, uploads and exports live in a private persistent folder. Keep an off-VM backup.
 
 ## Development checks
 

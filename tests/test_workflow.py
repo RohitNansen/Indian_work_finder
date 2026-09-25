@@ -5,10 +5,12 @@ from io import BytesIO
 from zoneinfo import ZoneInfo
 
 from docx import Document
+from fastapi.testclient import TestClient
 
 from app import db, search
 from app.alerts import run_due_alerts
 from app.config import settings
+from app.main import app
 from app.evidence import evidence_matches, store_evidence
 from app.resume import apply_changes, export_variant
 from conftest import csrf
@@ -149,6 +151,24 @@ def test_exhausted_job_quota_does_not_report_zero_suitable_jobs(test_env, monkey
                           locations="Chennai", work_types="", count=5)
     run = db.one("SELECT status,error FROM search_runs ORDER BY id DESC LIMIT 1")
     assert run["status"] == "failed"
+
+
+def test_existing_domain_path_prefix(test_env):
+    original_path = settings.app_base_path
+    original_url = settings.app_base_url
+    object.__setattr__(settings, "app_base_path", "/job-finder")
+    object.__setattr__(settings, "app_base_url", "https://hithanis.com/job-finder")
+    try:
+        with TestClient(app) as client:
+            assert client.get("/", follow_redirects=False).headers["location"] == "/job-finder/login"
+            assert 'action="/job-finder/login"' in client.get("/login").text
+            response = client.post("/login", data={"password": "test-password-long-enough"},
+                                   follow_redirects=False)
+            assert response.headers["location"] == "/job-finder/"
+            assert "Path=/job-finder" in response.headers["set-cookie"]
+    finally:
+        object.__setattr__(settings, "app_base_path", original_path)
+        object.__setattr__(settings, "app_base_url", original_url)
 
 
 def test_quota_alerts_once_and_retries_failure(test_env, monkeypatch):

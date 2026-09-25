@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def load_dotenv(path: Path = Path(".env")) -> None:
@@ -26,6 +27,7 @@ class Settings:
     app_password: str = os.getenv("APP_PASSWORD", "")
     app_secret: str = os.getenv("APP_SECRET", "")
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+    app_base_path: str = os.getenv("APP_BASE_PATH", urlparse(os.getenv("APP_BASE_URL", "http://localhost:8000")).path).rstrip("/")
     jsearch_api_key: str = os.getenv("JSEARCH_API_KEY", "")
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "google/gemini-3.8-flash")

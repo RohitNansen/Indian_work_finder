@@ -26,8 +26,8 @@
 </head>
 <body>
 <header><div class="shell"><strong>Job Finder{% if profile_name %} · {{ profile_name }}{% endif %}</strong>
-  <nav aria-label="Main navigation"><a href="/">Search</a><a href="/profile">My profile</a><a href="/my-jobs">Jobs I opened</a><a href="/alerts">Alerts</a><a href="/activity">Activity</a></nav>
-  <form class="inline-form" method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="secondary" type="submit">Sign out</button></form>
+  <nav aria-label="Main navigation"><a href="{{ base_path }}/">Search</a><a href="{{ base_path }}/profile">My profile</a><a href="{{ base_path }}/my-jobs">Jobs I opened</a><a href="{{ base_path }}/alerts">Alerts</a><a href="{{ base_path }}/activity">Activity</a></nav>
+  <form class="inline-form" method="post" action="{{ base_path }}/logout"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="secondary" type="submit">Sign out</button></form>
 </div></header>
 <main class="shell">{% block content %}{% endblock %}</main>
 </body></html>

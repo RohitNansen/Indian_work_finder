@@ -4,9 +4,9 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-User=jobfinder
-Group=jobfinder
-WorkingDirectory=/opt/indian-work-engine
-ExecStart=/usr/bin/flock -n /tmp/indian-work-engine-quota.lock /opt/indian-work-engine/.venv/bin/python -m app.quota
+User=rsa-key-20240330
+Group=rsa-key-20240330
+WorkingDirectory=/home/rsa-key-20240330/indian-work-engine
+ExecStart=/usr/bin/flock -n /tmp/indian-work-engine-quota.lock /home/rsa-key-20240330/indian-work-engine/.venv/bin/python -m app.quota
 NoNewPrivileges=true
 PrivateTmp=false

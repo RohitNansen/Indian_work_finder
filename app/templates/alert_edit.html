@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block title %}Edit alert · Job Finder{% endblock %}
-{% block content %}<p><a href="/alerts">← Back to alerts</a></p><h1>Edit alert</h1><form class="card" method="post" action="/alerts/{{ alert.id }}/edit"><input type="hidden" name="_csrf" value="{{ csrf }}">
+{% block content %}<p><a href="{{ base_path }}/alerts">← Back to alerts</a></p><h1>Edit alert</h1><form class="card" method="post" action="{{ base_path }}/alerts/{{ alert.id }}/edit"><input type="hidden" name="_csrf" value="{{ csrf }}">
 <div class="grid"><div><label for="name">Alert name</label><input id="name" name="name" value="{{ alert.name }}" required></div><div><label for="email">Send to email address</label><input id="email" name="email" type="email" value="{{ alert.email }}" required></div>
 <div><label for="roles">Roles to search</label><textarea id="roles" name="roles">{{ alert.role_labels }}</textarea></div><div><label for="keywords">Other work or skills</label><textarea id="keywords" name="keywords">{{ alert.keywords }}</textarea></div>
 <div><label for="locations">Places</label><input id="locations" name="locations" value="{{ alert.locations }}"></div><div><label for="work_types">Types of work</label><input id="work_types" name="work_types" value="{{ alert.work_types }}"></div>

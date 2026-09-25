@@ -1,8 +1,8 @@
 {% extends "base.html" %}{% block title %}My profile · Job Finder{% endblock %}
 {% block content %}<h1>My profile</h1><p class="muted">Upload a newer resume whenever your experience changes. You can also correct these fields yourself.</p>
 <div class="card"><h2>Resume</h2>{% if resume %}<p>Current file: <strong>{{ resume.filename }}</strong><br><span class="muted">Uploaded {{ resume.uploaded_at[:16].replace('T',' ') }} UTC</span></p>{% else %}<p>No resume uploaded yet.</p>{% endif %}
-<form method="post" action="/resume" enctype="multipart/form-data"><input type="hidden" name="_csrf" value="{{ csrf }}"><label for="resume">Upload a PDF or Word document</label><input id="resume" name="resume" type="file" accept=".pdf,.docx" required><div class="hint">Maximum 5 MB. A text-based PDF works best.</div><p><button>Upload resume</button></p></form></div>
-<form class="card" method="post" action="/profile"><input type="hidden" name="_csrf" value="{{ csrf }}"><h2>Search preferences</h2>
+<form method="post" action="{{ base_path }}/resume" enctype="multipart/form-data"><input type="hidden" name="_csrf" value="{{ csrf }}"><label for="resume">Upload a PDF or Word document</label><input id="resume" name="resume" type="file" accept=".pdf,.docx" required><div class="hint">Maximum 5 MB. A text-based PDF works best.</div><p><button>Upload resume</button></p></form></div>
+<form class="card" method="post" action="{{ base_path }}/profile"><input type="hidden" name="_csrf" value="{{ csrf }}"><h2>Search preferences</h2>
 <label for="name">Name for resume downloads</label><input id="name" name="name" value="{{ profile.name }}">
 <label for="role_labels">Roles I am interested in</label><textarea id="role_labels" name="role_labels">{{ profile.role_labels }}</textarea><div class="hint">Separate roles with commas.</div>
 <label for="keywords">My experience and search words</label><textarea id="keywords" name="keywords">{{ profile.keywords }}</textarea>
@@ -10,6 +10,6 @@
 <label for="work_types">Types of work I would consider</label><input id="work_types" name="work_types" value="{{ profile.work_types }}">
 <label for="notes">Anything else I want the search to know</label><textarea id="notes" name="notes">{{ profile.notes }}</textarea>
 <p><button>Save profile</button></p></form>
-{% if facts %}<div class="card"><h2>Experience added through job questions</h2><ul>{% for fact in facts %}<li>{{ fact.fact }} <form class="inline-form" method="post" action="/facts/{{ fact.id }}/remove"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="secondary">Remove</button></form></li>{% endfor %}</ul></div>{% endif %}
+{% if facts %}<div class="card"><h2>Experience added through job questions</h2><ul>{% for fact in facts %}<li>{{ fact.fact }} <form class="inline-form" method="post" action="{{ base_path }}/facts/{{ fact.id }}/remove"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="secondary">Remove</button></form></li>{% endfor %}</ul></div>{% endif %}
 {% if evidence %}<div class="card"><h2>Experience read from the resume</h2><p class="muted">These statements are used to compare jobs. Upload a revised resume to replace them.</p><details><summary>View {{ evidence|length }} statements</summary><div class="scroll"><table><thead><tr><th>Area</th><th>Employer and role</th><th>Resume statement</th></tr></thead><tbody>{% for e in evidence %}<tr><td>{{ e.section|title }}</td><td>{{ e.employer }}{% if e.role %}<br><span class="muted">{{ e.role }}</span>{% endif %}</td><td>{{ e.statement }}</td></tr>{% endfor %}</tbody></table></div></details></div>{% endif %}
 {% endblock %}
