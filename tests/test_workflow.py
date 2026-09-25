@@ -8,7 +8,7 @@ from docx import Document
 from fastapi.testclient import TestClient
 
 from app import db, search
-from app.alerts import run_due_alerts
+from app.alerts import parse_recipients, run_due_alerts
 from app.config import settings
 from app.main import app
 from app.evidence import evidence_matches, store_evidence
@@ -87,6 +87,10 @@ def test_resume_export_requires_exact_existing_wording(test_env):
 
 
 def test_alert_due_at_ist_once_per_day(test_env, monkeypatch):
+    provider_fields = ("jsearch_api_key", "openrouter_api_key", "resend_api_key", "email_from")
+    originals = {field: getattr(settings, field) for field in provider_fields}
+    for field in provider_fields:
+        object.__setattr__(settings, field, "test-value")
     aid = db.write(
         "INSERT INTO alerts(name,email,role_labels,keywords,locations,work_types,time_ist,count,"
         "days_recent,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -101,9 +105,71 @@ def test_alert_due_at_ist_once_per_day(test_env, monkeypatch):
         return 3
     monkeypatch.setattr(alerts, "run_alert", fake_run)
     now = datetime(2026, 9, 25, 8, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
-    assert run_due_alerts(now) == [(aid, "sent 3")]
-    assert run_due_alerts(now) == []
-    assert sent == [aid]
+    try:
+        assert run_due_alerts(now) == [(aid, "sent 3")]
+        assert run_due_alerts(now) == []
+        assert sent == [aid]
+    finally:
+        for field, value in originals.items():
+            object.__setattr__(settings, field, value)
+
+
+def test_alert_recipients_are_editable_and_validated(client):
+    recipients = "one@example.com, two@example.org"
+    data = {"_csrf": csrf(client), "name": "Daily research jobs", "email": recipients,
+            "roles": "R&D Head", "keywords": "quality", "locations": "Chennai",
+            "work_types": "Consulting", "time_ist": "08:00", "count": "5",
+            "days_recent": "7"}
+    assert client.post("/alerts", data=data).status_code == 200
+    saved = db.one("SELECT id,email FROM alerts ORDER BY id DESC LIMIT 1")
+    assert saved["email"] == recipients
+    assert recipients in client.get(f"/alerts/{saved['id']}/edit").text
+    data["email"] = "one@example.com"
+    client.post(f"/alerts/{saved['id']}/edit", data=data)
+    assert db.one("SELECT email FROM alerts WHERE id=?", (saved["id"],))["email"] == data["email"]
+    data["email"] = "not an email, two@example.org"
+    assert client.post(f"/alerts/{saved['id']}/edit", data=data).status_code == 400
+    assert parse_recipients(recipients) == ["one@example.com", "two@example.org"]
+    with pytest.raises(ValueError, match="duplicate"):
+        parse_recipients("one@example.com, ONE@example.com")
+
+
+def test_email_request_includes_both_alert_recipients(test_env, monkeypatch):
+    from app import alerts
+    sent = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"id": "sent-id"}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def post(self, url, **kwargs):
+            sent.append(kwargs["json"]["to"])
+            return Response()
+
+    old_key, old_from = settings.resend_api_key, settings.email_from
+    object.__setattr__(settings, "resend_api_key", "test-key")
+    object.__setattr__(settings, "email_from", "sender@example.com")
+    monkeypatch.setattr(alerts.httpx, "Client", Client)
+    try:
+        assert alerts.send_email(parse_recipients(
+            "one@example.com, two@example.org"), "Jobs", "Body") == "sent-id"
+        assert sent == [["one@example.com", "two@example.org"]]
+    finally:
+        object.__setattr__(settings, "resend_api_key", old_key)
+        object.__setattr__(settings, "email_from", old_from)
 
 
 def test_resume_evidence_keeps_employer_and_role_context(test_env):

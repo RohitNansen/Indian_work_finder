@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from .ai import extract_profile, propose_resume_edits
+from .alerts import parse_recipients
 from .config import settings
 from .db import all_rows, connect, init_db, one, utcnow, write
 from .evidence import store_evidence
@@ -347,17 +348,22 @@ def alerts_page(request: Request):
     if response := auth_or_redirect(request):
         return response
     return page(request, "alerts.html", alerts=all_rows("SELECT * FROM alerts ORDER BY id DESC"),
-                profile=one("SELECT * FROM profile WHERE id=1"))
+                profile=one("SELECT * FROM profile WHERE id=1"),
+                delivery_ready=all((settings.jsearch_api_key, settings.openrouter_api_key,
+                                    settings.resend_api_key, settings.email_from)))
 
 
 @app.post("/alerts")
 async def add_alert(request: Request):
     await check_post(request)
     form = await request.form()
-    email = str(form.get("email", "")).strip()
+    try:
+        email = ", ".join(parse_recipients(str(form.get("email", ""))))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     time_ist = str(form.get("time_ist", "08:00"))
     count = int(form.get("count", 5))
-    if "@" not in email or len(email) > 254 or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time_ist) or not 1 <= count <= 50:
+    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time_ist) or not 1 <= count <= 50:
         raise HTTPException(400, "Check email, time and number of jobs")
     write(
         "INSERT INTO alerts(name,email,role_labels,keywords,locations,work_types,time_ist,count,"
@@ -393,10 +399,13 @@ def edit_alert_page(request: Request, alert_id: int):
 async def save_alert(request: Request, alert_id: int):
     await check_post(request)
     form = await request.form()
-    email = str(form.get("email", "")).strip()
+    try:
+        email = ", ".join(parse_recipients(str(form.get("email", ""))))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     time_ist = str(form.get("time_ist", "08:00"))
     count = int(form.get("count", 5))
-    if "@" not in email or len(email) > 254 or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time_ist) or not 1 <= count <= 50:
+    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time_ist) or not 1 <= count <= 50:
         raise HTTPException(400, "Check email, time and number of jobs")
     previous = one("SELECT time_ist FROM alerts WHERE id=?", (alert_id,))
     if not previous:

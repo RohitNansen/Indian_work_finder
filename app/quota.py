@@ -126,9 +126,9 @@ def local_quotas() -> None:
                "WHERE started_at LIKE ?", (f"{month}%",))["total"]
     evaluate("Job Finder", "configured monthly API spend", month,
              float(cost), settings.monthly_spend_limit_usd)
-    sent_month = one("SELECT COUNT(*) AS n FROM email_runs WHERE status='sent' AND sent_at LIKE ?",
+    sent_month = one("SELECT COALESCE(SUM(recipient_count),0) AS n FROM email_runs WHERE status='sent' AND sent_at LIKE ?",
                      (f"{month}%",))["n"]
-    sent_day = one("SELECT COUNT(*) AS n FROM email_runs WHERE status='sent' AND sent_at LIKE ?",
+    sent_day = one("SELECT COALESCE(SUM(recipient_count),0) AS n FROM email_runs WHERE status='sent' AND sent_at LIKE ?",
                    (f"{day}%",))["n"]
     quota_month = one("SELECT COUNT(*) AS n FROM quota_notifications WHERE status='sent' "
                       "AND sent_at LIKE ?", (f"{month}%",))["n"]

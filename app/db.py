@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS alert_jobs (
 CREATE TABLE IF NOT EXISTS email_runs (
   id INTEGER PRIMARY KEY, alert_id INTEGER NOT NULL,
   attempted_at TEXT NOT NULL, sent_at TEXT, count INTEGER NOT NULL,
+  recipient_count INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL, response_id TEXT, error TEXT
 );
 CREATE TABLE IF NOT EXISTS quota_checks (
@@ -162,6 +163,9 @@ def init_db(path: Path | None = None) -> None:
             db.execute("ALTER TABLE search_results ADD COLUMN retirement_signal TEXT NOT NULL DEFAULT 'unknown'")
         if "retirement_evidence" not in columns:
             db.execute("ALTER TABLE search_results ADD COLUMN retirement_evidence TEXT NOT NULL DEFAULT ''")
+        email_columns = {row["name"] for row in db.execute("PRAGMA table_info(email_runs)")}
+        if "recipient_count" not in email_columns:
+            db.execute("ALTER TABLE email_runs ADD COLUMN recipient_count INTEGER NOT NULL DEFAULT 1")
         db.execute("INSERT OR IGNORE INTO profile(id,updated_at) VALUES(1,?)", (utcnow(),))
 
 

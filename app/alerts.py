@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -15,7 +16,19 @@ from .search import run_search
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def send_email(to_address: str, subject: str, content: str) -> str:
+def parse_recipients(value: str) -> list[str]:
+    addresses = [part.strip() for part in re.split(r"[,;\n]+", value) if part.strip()]
+    if not 1 <= len(addresses) <= 5 or any(
+        len(address) > 254 or not re.fullmatch(r"[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+", address)
+        for address in addresses
+    ):
+        raise ValueError("Enter 1 to 5 valid email addresses, separated by commas")
+    if len({address.lower() for address in addresses}) != len(addresses):
+        raise ValueError("Remove duplicate email addresses")
+    return addresses
+
+
+def send_email(to_address: str | list[str], subject: str, content: str) -> str:
     if not settings.resend_api_key or not settings.email_from:
         raise RuntimeError("Email delivery is not configured yet")
     with httpx.Client(timeout=30) as client:
@@ -23,7 +36,8 @@ def send_email(to_address: str, subject: str, content: str) -> str:
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {settings.resend_api_key}",
                      "Content-Type": "application/json"},
-            json={"from": settings.email_from, "to": [to_address],
+            json={"from": settings.email_from,
+                  "to": [to_address] if isinstance(to_address, str) else to_address,
                   "subject": subject, "html": content},
         )
     response.raise_for_status()
@@ -32,6 +46,7 @@ def send_email(to_address: str, subject: str, content: str) -> str:
 
 def run_alert(alert) -> int:
     alert_id = alert["id"]
+    recipients = parse_recipients(alert["email"])
     run_id = run_search(
         kind="alert", alert_id=alert_id, roles=alert["role_labels"],
         keywords=alert["keywords"], locations=alert["locations"],
@@ -45,8 +60,8 @@ def run_alert(alert) -> int:
         (run_id, alert_id, alert["count"]),
     )
     email_id = write(
-        "INSERT INTO email_runs(alert_id,attempted_at,count,status) VALUES(?,?,?,?)",
-        (alert_id, utcnow(), len(jobs), "sending"),
+        "INSERT INTO email_runs(alert_id,attempted_at,count,recipient_count,status) VALUES(?,?,?,?,?)",
+        (alert_id, utcnow(), len(jobs), len(recipients), "sending"),
     )
     body = ["<div style='font-family:Arial,sans-serif;max-width:620px'>",
             f"<h2>{html.escape(alert['name'])}</h2>"]
@@ -61,7 +76,7 @@ def run_alert(alert) -> int:
         )
     body.append("<p>Open the job in your private app to review details and apply.</p></div>")
     try:
-        response_id = send_email(alert["email"],
+        response_id = send_email(recipients,
                                  f"{len(jobs)} new jobs — {alert['name']}", "".join(body))
         today = datetime.now(IST).date().isoformat()
         with connect() as db:
@@ -83,6 +98,9 @@ def run_alert(alert) -> int:
 
 
 def run_due_alerts(now: datetime | None = None) -> list[tuple[int, str]]:
+    if not all((settings.jsearch_api_key, settings.openrouter_api_key,
+                settings.resend_api_key, settings.email_from)):
+        return []
     now = (now or datetime.now(IST)).astimezone(IST)
     today, time_now = now.date().isoformat(), now.strftime("%H:%M")
     alerts = all_rows(
