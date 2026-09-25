@@ -4,17 +4,17 @@ A private job finder for one experienced professional in India. It searches live
 
 ## Current state
 
-The first version is implemented and runs locally. Search quality, resume wording, and the three-model comparison must be validated with the actual resume and live listings before production use. A scanned PDF needs OCR or a text-based copy.
+The first version is implemented and runs locally. The supplied text-based resume has been read and mapped into private evidence records. Search quality, resume wording, and the three-model comparison still need validation with live listings before production use. A scanned PDF needs OCR or a text-based copy.
 
 ## Features
 
-- Upload and replace a PDF or DOCX resume; edit name, roles, keywords, places and work types.
+- Upload and replace a PDF or DOCX resume; inspect extracted evidence; edit name, roles, keywords, places and work types.
 - Search JSearch on demand, deduplicate results, rank by profile and full job description, and show plain-language reasons without visible scores.
 - Ask optional job-specific experience questions; confirmed answers feed future searches.
 - Separate **Jobs I opened** table, with click times and manually updated application status.
 - Review proposed resume wording changes, approve each change, and download a named Word and PDF copy.
 - Create, edit, pause and resume email alerts; default five new roles at 08:00 IST.
-- Private Activity page with search parameters, returned links, provider calls, token counts, cost estimates and delivery results.
+- Private Activity page with search parameters, returned links, provider calls, token counts, cost estimates, quota checks and delivery results.
 - Configurable OpenRouter model, spending cap and JSearch request cap.
 
 The app never submits an application on the person's behalf. Opening a link is recorded as a click, not an application.
@@ -36,6 +36,7 @@ Edit `.env` with a long `APP_PASSWORD` and random `APP_SECRET`. Put provider key
 ```
 
 Open `http://localhost:8000`. For an alert schedule check, run `python -m app.alerts` from a timer once per minute. Alerts created after their configured time wait until the next day; overdue alerts are sent after a VM restart on the same day.
+Run `python -m app.quota` hourly to check provider limits and send owner alerts when email delivery is configured.
 
 ## Model comparison
 

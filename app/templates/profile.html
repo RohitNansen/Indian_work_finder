@@ -11,4 +11,5 @@
 <label for="notes">Anything else I want the search to know</label><textarea id="notes" name="notes">{{ profile.notes }}</textarea>
 <p><button>Save profile</button></p></form>
 {% if facts %}<div class="card"><h2>Experience added through job questions</h2><ul>{% for fact in facts %}<li>{{ fact.fact }} <form class="inline-form" method="post" action="/facts/{{ fact.id }}/remove"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="secondary">Remove</button></form></li>{% endfor %}</ul></div>{% endif %}
+{% if evidence %}<div class="card"><h2>Experience read from the resume</h2><p class="muted">These statements are used to compare jobs. Upload a revised resume to replace them.</p><details><summary>View {{ evidence|length }} statements</summary><div class="scroll"><table><thead><tr><th>Area</th><th>Employer and role</th><th>Resume statement</th></tr></thead><tbody>{% for e in evidence %}<tr><td>{{ e.section|title }}</td><td>{{ e.employer }}{% if e.role %}<br><span class="muted">{{ e.role }}</span>{% endif %}</td><td>{{ e.statement }}</td></tr>{% endfor %}</tbody></table></div></details></div>{% endif %}
 {% endblock %}

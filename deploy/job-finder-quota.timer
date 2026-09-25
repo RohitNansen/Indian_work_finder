@@ -1,0 +1,10 @@
+[Unit]
+Description=Check job finder quotas hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=job-finder-quota.service
+
+[Install]
+WantedBy=timers.target

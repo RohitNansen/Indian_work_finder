@@ -4,13 +4,13 @@ The first release serves one experienced professional. It prioritizes usable job
 
 ## PBI 1 — Profile and replaceable resume
 
-**Description:** Upload PDF/DOCX, extract text, suggest roles/keywords, and allow manual corrections. Keep previous uploads for provenance while using the newest for recommendations.
+**Description:** Upload PDF/DOCX, extract text into traceable resume statements with employer and role context, suggest roles/keywords, and allow manual corrections. Keep previous uploads for provenance while using the newest for recommendations.
 
 **Acceptance criteria:** A text-based file under 5 MB uploads; the user sees its name; a later upload becomes current; field edits persist; unsupported scanned files show a clear message; resume files are outside Git.
 
 **Test scenarios:** Upload valid DOCX/PDF, replace it, try an invalid file and oversized file, edit role/location fields, restart app and confirm persistence.
 
-**Status:** Implemented; real-resume validation pending.
+**Status:** Implemented; supplied resume parsed locally. Confirm the extracted statements in the Profile screen after deployment.
 
 ## PBI 2 — Broad job search and curated shortlist
 
@@ -20,7 +20,7 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Duplicate API results, empty results, provider failure, location mismatch, a transferable senior role with a different title, and a junior role with overlapping keywords.
 
-**Status:** Implemented; live India coverage and link checks pending.
+**Status:** Implemented with recent-post filter, explicit inactive/expired-post exclusion, and evidence-linked first-pass ranking; live India coverage and employer-page verification pending. A recent index entry alone cannot prove that an employer still accepts applications.
 
 ## PBI 3 — Job questions and growing experience memory
 
@@ -72,6 +72,16 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Status:** Implemented; end-to-end live provider audit pending.
 
+## PBI 7a — Quota alerts for the owner
+
+**Description:** Poll provider quota endpoints and local spending/email counts hourly, and notify the owner's configured address at 80%, 95% and 100% usage or after provider limit responses.
+
+**Acceptance criteria:** JSearch quota, capped OpenRouter key, local monthly API spend and app email counts are logged; each threshold emails once per period; failed sends are visible and retryable; keys never enter logs. An uncapped OpenRouter key only exposes local spend and provider errors, so a key-level cap is recommended.
+
+**Test scenarios:** Threshold crossing, repeat check, new billing period, exhausted provider response, email failure and retry, and absent email sender configuration.
+
+**Status:** Implemented; live email delivery pending sender and rotated keys.
+
 ## PBI 8 — Deployment and quality gate
 
 **Description:** Publish Git repo, install app on the 1 GB Linux VM, enable HTTPS and systemd timers, set backups and compare three OpenRouter models on a human-reviewed job set.
@@ -80,4 +90,4 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Clean install from Git, restart VM, edit alert then confirm send, restore backup, compare model top-five lists and resume edits, test mobile-width UI.
 
-**Status:** Pending GitHub sign-in, VM connection details, rotated keys, sender setup and actual resume.
+**Status:** Repository published and actual resume supplied; VM connection details, rotated keys, sender setup and live quality review pending.

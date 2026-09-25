@@ -18,8 +18,13 @@ from starlette.concurrency import run_in_threadpool
 from .ai import extract_profile, propose_resume_edits
 from .config import settings
 from .db import all_rows, connect, init_db, one, utcnow, write
+from .evidence import store_evidence
 from .resume import export_variant, extract_text
 from .search import DEFAULT_ROLES, labels, run_search
+
+DEFAULT_KEYWORDS = ["Research and development", "Quality management", "Product development",
+                    "Robotics", "Electronics", "Electrical engineering", "Textiles",
+                    "Life sciences", "Consulting"]
 
 app = FastAPI(title="Indian Work Engine", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -116,7 +121,9 @@ def home(request: Request):
     resume = one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1")
     latest = all_rows("SELECT * FROM search_runs ORDER BY id DESC LIMIT 5")
     return page(request, "home.html", profile=profile, resume=resume, latest=latest,
-                default_roles=", ".join(DEFAULT_ROLES))
+                default_roles=", ".join(DEFAULT_ROLES),
+                role_suggestions=list(dict.fromkeys(labels(profile["role_labels"]) + DEFAULT_ROLES))[:12],
+                keyword_suggestions=list(dict.fromkeys(labels(profile["keywords"]) + DEFAULT_KEYWORDS))[:15])
 
 
 @app.get("/profile", response_class=HTMLResponse)
@@ -125,6 +132,8 @@ def profile_page(request: Request):
         return response
     return page(request, "profile.html", profile=one("SELECT * FROM profile WHERE id=1"),
                 resume=one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1"),
+                evidence=all_rows("SELECT section,employer,role,statement FROM resume_evidence "
+                                  "WHERE resume_id=(SELECT MAX(id) FROM resumes) ORDER BY id"),
                 facts=all_rows("SELECT * FROM facts WHERE active=1 ORDER BY id DESC"))
 
 
@@ -153,11 +162,12 @@ async def upload_resume(request: Request, resume: UploadFile = File(...)):
         raise HTTPException(400, str(exc)) from exc
     stored = settings.data_dir / "uploads" / f"{secrets.token_hex(12)}{Path(filename).suffix.lower()}"
     stored.write_bytes(data)
-    write(
+    resume_id = write(
         "INSERT INTO resumes(filename,stored_path,file_type,resume_text,style_sample,uploaded_at) "
         "VALUES(?,?,?,?,?,?)",
         (filename, str(stored), Path(filename).suffix.lower(), text, style_sample, utcnow()),
     )
+    store_evidence(resume_id, text)
     if settings.openrouter_api_key:
         try:
             extracted = extract_profile(text)
@@ -214,7 +224,8 @@ def job_page(request: Request, job_id: str):
     job = one("SELECT * FROM jobs WHERE id=?", (job_id,))
     if not job:
         raise HTTPException(404)
-    row = one("SELECT questions_json,why FROM search_results WHERE job_id=? ORDER BY run_id DESC LIMIT 1",
+    row = one("SELECT questions_json,why,retirement_signal,retirement_evidence FROM search_results "
+              "WHERE job_id=? ORDER BY run_id DESC LIMIT 1",
               (job_id,))
     if row:
         with connect() as db:
@@ -235,6 +246,8 @@ def job_page(request: Request, job_id: str):
     variants = all_rows("SELECT * FROM resume_variants WHERE job_id=? ORDER BY id DESC", (job_id,))
     return page(request, "job.html", job=job, questions=questions,
                 why=row["why"] if row else "", status=status["status"] if status else "New",
+                retirement_signal=row["retirement_signal"] if row else "unknown",
+                retirement_evidence=row["retirement_evidence"] if row else "",
                 variants=variants,
                 has_resume=one("SELECT id FROM resumes ORDER BY id DESC LIMIT 1") is not None)
 
@@ -398,7 +411,10 @@ def activity_page(request: Request):
                 results=all_rows("SELECT r.run_id,j.title,j.company,j.apply_url,r.rank "
                                  "FROM search_results r JOIN jobs j ON j.id=r.job_id "
                                  "ORDER BY r.run_id DESC,r.rank LIMIT 100"),
-                emails=all_rows("SELECT * FROM email_runs ORDER BY id DESC LIMIT 50"))
+                emails=all_rows("SELECT * FROM email_runs ORDER BY id DESC LIMIT 50"),
+                quotas=all_rows("SELECT * FROM quota_checks ORDER BY id DESC LIMIT 50"),
+                quota_notifications=all_rows("SELECT * FROM quota_notifications "
+                                             "ORDER BY id DESC LIMIT 50"))
 
 
 @app.post("/jobs/{job_id}/resume/propose")

@@ -1,4 +1,5 @@
 import json
+import pytest
 from datetime import datetime
 from io import BytesIO
 from zoneinfo import ZoneInfo
@@ -8,6 +9,7 @@ from docx import Document
 from app import db, search
 from app.alerts import run_due_alerts
 from app.config import settings
+from app.evidence import evidence_matches, store_evidence
 from app.resume import apply_changes, export_variant
 from conftest import csrf
 
@@ -100,3 +102,73 @@ def test_alert_due_at_ist_once_per_day(test_env, monkeypatch):
     assert run_due_alerts(now) == [(aid, "sent 3")]
     assert run_due_alerts(now) == []
     assert sent == [aid]
+
+
+def test_resume_evidence_keeps_employer_and_role_context(test_env):
+    rid = db.write("INSERT INTO resumes(filename,stored_path,file_type,resume_text,style_sample,uploaded_at) "
+                   "VALUES(?,?,?,?,?,?)", ("example.pdf", "private.pdf", ".pdf", "text", "", db.utcnow()))
+    text = ("PROFESSIONAL EXPERIENCE\nExample Engineering Ltd.\n"
+            "Director - R&D | Chennai | 2000 - 2026\n"
+            "• Led robotic medical device product development.\n"
+            "• Built and led a team of 30 engineers.\n"
+            "EDUCATION & PROFESSIONAL TRAINING\n• MS in Electronics\n")
+    assert store_evidence(rid, text) == 3
+    rows = db.all_rows("SELECT * FROM resume_evidence ORDER BY id")
+    assert rows[0]["employer"] == "Example Engineering Ltd."
+    assert "Director - R&D" in rows[0]["role"]
+    assert rows[2]["section"] == "education"
+    matches = evidence_matches({"title": "Medical Device R&D Head",
+                                 "description": "Lead robotics product development"}, rows)
+    assert matches and matches[0][1]["id"] == rows[0]["id"]
+
+
+def test_rejects_explicitly_inactive_or_expired_jobs():
+    raw = sample_job("R&D Head", "Example", "inactive")
+    raw["job_is_active"] = False
+    assert not search.acceptable_job(raw)
+    raw["job_is_active"] = True
+    raw["job_offer_expiration_datetime_utc"] = "2020-01-01T00:00:00Z"
+    assert not search.acceptable_job(raw)
+
+
+def test_role_search_includes_selected_keywords_and_rotates_places():
+    queue = list(search.query_queue(["Electrical R&D Head", "Quality Head"],
+                                    ["Chennai", "Bengaluru", "Remote India"],
+                                    ["Electrical design", "Quality management"]))
+    assert any("Electrical design" in item[0] for item in queue)
+    assert any("Quality management" in item[0] for item in queue)
+    assert {place for place in ("Chennai", "Bengaluru", "remote in India")
+            if any(place in query for query, _, _ in queue)} == {"Chennai", "Bengaluru", "remote in India"}
+
+
+def test_exhausted_job_quota_does_not_report_zero_suitable_jobs(test_env, monkeypatch):
+    object.__setattr__(settings, "jsearch_api_key", "test-key")
+    monkeypatch.setattr(search, "fetch_page", lambda *args: (_ for _ in ()).throw(search.QuotaExceeded("limit")))
+    with pytest.raises(RuntimeError, match="quota reached"):
+        search.run_search(kind="manual", roles="R&D Head", keywords="",
+                          locations="Chennai", work_types="", count=5)
+    run = db.one("SELECT status,error FROM search_runs ORDER BY id DESC LIMIT 1")
+    assert run["status"] == "failed"
+
+
+def test_quota_alerts_once_and_retries_failure(test_env, monkeypatch):
+    from app import quota
+    object.__setattr__(settings, "quota_alert_email", "owner@example.com")
+    sent = []
+    monkeypatch.setattr(quota, "send_email", lambda *args: sent.append(args) or "message-id")
+    quota.evaluate("JSearch", "Requests", "2026-09", 96, 100)
+    quota.evaluate("JSearch", "Requests", "2026-09", 96, 100)
+    assert len(sent) == 2  # 80 and 95, each sent once
+    assert db.one("SELECT COUNT(*) AS n FROM quota_notifications")["n"] == 2
+    quota.evaluate("JSearch", "Requests", "2026-10", 100, 100)
+    assert len(sent) == 5  # New period: 80, 95 and 100
+    def fail(*args):
+        raise RuntimeError("mail unavailable")
+    monkeypatch.setattr(quota, "send_email", fail)
+    quota.evaluate("OpenRouter", "API key spend", "2026-09", 100, 100)
+    assert db.one("SELECT status FROM quota_notifications WHERE provider='OpenRouter' "
+                  "AND threshold=100")["status"] == "failed"
+    monkeypatch.setattr(quota, "send_email", lambda *args: "retry-id")
+    quota.evaluate("OpenRouter", "API key spend", "2026-09", 100, 100)
+    assert db.one("SELECT status FROM quota_notifications WHERE provider='OpenRouter' "
+                  "AND threshold=100")["status"] == "sent"

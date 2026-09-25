@@ -12,11 +12,16 @@ import httpx
 from .ai import rank_jobs
 from .config import settings
 from .db import all_rows, connect, one, utcnow, write
+from .evidence import current_evidence, evidence_matches
 
 DEFAULT_ROLES = [
     "R&D Director", "Research and Development Consultant", "Head of Quality",
     "Technical Advisor", "Product Development Lead", "Innovation Consultant",
 ]
+
+
+class QuotaExceeded(RuntimeError):
+    pass
 
 
 def labels(value: str) -> list[str]:
@@ -44,6 +49,18 @@ def choose_apply_url(raw: dict) -> str:
 
 
 def acceptable_job(raw: dict) -> bool:
+    if raw.get("job_is_active") is False:
+        return False
+    expires = raw.get("job_offer_expiration_datetime_utc")
+    if expires:
+        try:
+            expiry = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if expiry < datetime.now(timezone.utc):
+                return False
+        except ValueError:
+            pass
     url = choose_apply_url(raw)
     if not url.startswith("https://") or not urlparse(url).netloc:
         return False
@@ -86,13 +103,21 @@ def date_filter(days_recent: int) -> str:
     return "all"
 
 
-def query_queue(roles: list[str], locations: list[str]):
+def query_queue(roles: list[str], locations: list[str], keywords: list[str] | None = None):
     queue = deque()
-    for role in roles:
-        for location in locations:
+    keywords = keywords or []
+    # Rotate locations so the early request budget covers every role and place.
+    for offset in range(len(locations)):
+        for index, role in enumerate(roles):
+            location = locations[(index + offset) % len(locations)]
             remote = "remote" in location.lower()
             query = f"{role} {'remote in India' if remote else 'jobs in ' + location}"
             queue.append((query, remote, None))
+            if keywords:
+                role_words = set(re.findall(r"[a-z]{4,}", role.lower()))
+                matching = [k for k in keywords if role_words & set(re.findall(r"[a-z]{4,}", k.lower()))]
+                term = (matching or keywords)[(index + offset) % len(matching or keywords)]
+                queue.append((f"{role} {term} {'remote in India' if remote else 'jobs in ' + location}", remote, None))
     return queue
 
 
@@ -129,8 +154,11 @@ def fetch_page(run_id: int, query: str, remote: bool, cursor: str | None,
         )
         return jobs, next_cursor
     except Exception as exc:
-        write("UPDATE api_calls SET error=?,completed_at=? WHERE id=?",
-              (str(exc)[:500], utcnow(), call_id))
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        write("UPDATE api_calls SET http_status=?,error=?,completed_at=? WHERE id=?",
+              (status, str(exc)[:500], utcnow(), call_id))
+        if status in (402, 429):
+            raise QuotaExceeded(f"JSearch returned HTTP {status}") from exc
         raise
 
 
@@ -209,19 +237,26 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         (kind, alert_id, utcnow(), json.dumps(params, ensure_ascii=False)),
     )
     try:
-        queue = query_queue(roles_list, location_list)
+        queue = query_queue(roles_list, location_list, keywords_list)
         seen: dict[str, dict] = {}
         seen_signatures: set[str] = set()
         calls = 0
+        successful_calls = 0
+        quota_limited = False
         # Search enough alternatives to curate the requested number, within a clear API cap.
-        while queue and calls < settings.jsearch_max_requests_per_run and len(seen) < count * 4:
+        minimum_coverage = min(len(roles_list), settings.jsearch_max_requests_per_run)
+        while queue and calls < settings.jsearch_max_requests_per_run and (len(seen) < count * 4 or calls < minimum_coverage):
             query, remote, cursor = queue.popleft()
             try:
                 page, next_cursor = fetch_page(run_id, query, remote, cursor, days_recent)
+            except QuotaExceeded:
+                quota_limited = True
+                break
             except Exception:
                 calls += 1
                 continue
             calls += 1
+            successful_calls += 1
             for raw in page:
                 if not acceptable_job(raw) or not work_type_matches(raw, labels(work_types)):
                     continue
@@ -237,8 +272,13 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                 seen[job["id"]] = job
             if next_cursor and len(seen) < count * 4:
                 queue.append((query, remote, next_cursor))
+        if not successful_calls:
+            raise RuntimeError("JSearch quota reached" if quota_limited else "JSearch could not return jobs")
         context = profile_context() + f"\nCurrent search work types: {work_types}\nLocations: {locations}"
-        scored = [(deterministic_score(j, roles_list, keywords_list, context), j)
+        resume_evidence = current_evidence()
+        matches_by_job = {j["id"]: evidence_matches(j, resume_evidence) for j in seen.values()}
+        scored = [(deterministic_score(j, roles_list, keywords_list, context)
+                   + min(20, sum(score for score, _ in matches_by_job[j["id"]]) * 0.35), j)
                   for j in seen.values()]
         scored.sort(key=lambda x: x[0], reverse=True)
         candidates = [j for _, j in scored[:min(settings.openrouter_max_jobs_per_run,
@@ -253,23 +293,42 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         ordered = []
         for base, job in scored:
             evaluation = ai.get(job["id"], {})
-            score = float(evaluation.get("relevance", base))
+            signal = evaluation.get("retirement_signal", "unknown")
+            evidence = evaluation.get("retirement_evidence", "")
+            if not evidence or evidence.lower() not in job["description"].lower():
+                signal, evidence = "unknown", ""
+            if evaluation:
+                score = 0.8 * max(0, min(100, float(evaluation.get("relevance", 0)))) + 0.2 * min(100, base)
+            else:
+                score = min(100, base) * (0.5 if ai else 1.0)
+            if signal == "welcomes_retired":
+                score += 8
+            elif signal == "explicit_restriction":
+                score -= 20
             why = evaluation.get("why") or "Relevant senior experience and search preferences"
             questions = evaluation.get("unconfirmed") or []
-            ordered.append((score, job, why, questions))
+            ordered.append((score, job, why, questions, signal, evidence))
         ordered.sort(key=lambda x: x[0], reverse=True)
         with connect() as db:
-            for rank, (score, job, why, questions) in enumerate(ordered[:count], 1):
+            for rank, (score, job, why, questions, signal, evidence) in enumerate(ordered[:count], 1):
                 db.execute(
-                    "INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json) "
-                    "VALUES(?,?,?,?,?,?)",
+                    "INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,"
+                    "retirement_signal,retirement_evidence) VALUES(?,?,?,?,?,?,?,?)",
                     (run_id, job["id"], rank, score, why,
-                     json.dumps(questions[:3], ensure_ascii=False)),
+                     json.dumps(questions[:3], ensure_ascii=False), signal, evidence),
+                )
+                db.executemany(
+                    "INSERT INTO job_evidence_matches(run_id,job_id,evidence_id,relevance) "
+                    "VALUES(?,?,?,?)",
+                    [(run_id, job["id"], row["id"], strength)
+                     for strength, row in matches_by_job[job["id"]]],
                 )
             db.execute(
-                "UPDATE search_runs SET completed_at=?,status='complete',found_count=?,"
-                "shortlisted_count=? WHERE id=?",
-                (utcnow(), len(seen), min(count, len(ordered)), run_id),
+                "UPDATE search_runs SET completed_at=?,status=?,found_count=?,"
+                "shortlisted_count=?,error=? WHERE id=?",
+                (utcnow(), "partial_quota" if quota_limited else "complete", len(seen),
+                 min(count, len(ordered)), "JSearch quota reached during search" if quota_limited else None,
+                 run_id),
             )
         return run_id
     except Exception as exc:

@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Job Finder provider quotas
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=jobfinder
+Group=jobfinder
+WorkingDirectory=/opt/indian-work-engine
+ExecStart=/usr/bin/flock -n /tmp/indian-work-engine-quota.lock /opt/indian-work-engine/.venv/bin/python -m app.quota
+NoNewPrivileges=true
+PrivateTmp=false

@@ -86,9 +86,10 @@ def ask_json(*, run_id: int | None, operation: str, instructions: str,
         )
         return parsed
     except Exception as exc:
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
         write(
-            "UPDATE api_calls SET error=?,completed_at=? WHERE id=?",
-            (str(exc)[:500], utcnow(), call_id),
+            "UPDATE api_calls SET http_status=?,error=?,completed_at=? WHERE id=?",
+            (status, str(exc)[:500], utcnow(), call_id),
         )
         raise
 
@@ -123,11 +124,13 @@ RANK_SCHEMA = {
             "id": {"type": "string"},
             "relevance": {"type": "integer"},
             "why": {"type": "string"},
+            "retirement_signal": {"type": "string", "enum": ["welcomes_retired", "explicit_restriction", "unknown"]},
+            "retirement_evidence": {"type": "string"},
             "unconfirmed": {"type": "array", "items": {"type": "object", "properties": {
                 "requirement": {"type": "string"},
                 "question": {"type": "string"},
             }, "required": ["requirement", "question"], "additionalProperties": False}},
-        }, "required": ["id", "relevance", "why", "unconfirmed"],
+        }, "required": ["id", "relevance", "why", "retirement_signal", "retirement_evidence", "unconfirmed"],
         "additionalProperties": False}},
     }, "required": ["jobs"], "additionalProperties": False,
 }
@@ -147,6 +150,11 @@ def rank_jobs(run_id: int | None, profile: str, jobs: list[dict[str, Any]],
                 "The resume and confirmed answers have priority over unverified claims. "
                 "Consider seniority, location, employment type and whether the role is plausibly "
                 "open to an experienced retiree. Do not assume age restrictions where unstated. "
+                "For retirement_signal, use 'welcomes_retired' only if the listing explicitly "
+                "welcomes retired or post-retirement candidates; use 'explicit_restriction' only "
+                "if it explicitly states a relevant exclusion or age limit. Otherwise use 'unknown'. "
+                "retirement_evidence must be a short exact quote from the job description, "
+                "or empty when unknown. Full-time status alone proves neither case. "
                 "Return an internal 0-100 relevance number. Write one concise, evidence-grounded "
                 "positive reason. For important job requirements not established by the profile, "
                 "provide at most three plain questions only when an answer could materially "
