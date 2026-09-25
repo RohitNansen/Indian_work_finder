@@ -90,4 +90,4 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Clean install from Git, restart VM, edit alert then confirm send, restore backup, compare model top-five lists and resume edits, test mobile-width UI.
 
-**Status:** Repository published and actual resume supplied; VM connection details, rotated keys, sender setup and live quality review pending.
+**Status:** App deployed on the existing VM under `/job-finder/`; HTTPS, login, profile, timers, and backup service verified. Rotated search keys, email sender, a live ranking review, and recurring off-VM backup remain pending.

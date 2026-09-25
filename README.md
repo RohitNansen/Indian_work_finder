@@ -4,7 +4,7 @@ A private job finder for one experienced professional in India. It searches live
 
 ## Current state
 
-The first version is implemented and runs locally. The supplied text-based resume has been read and mapped into private evidence records. Search quality, resume wording, and the three-model comparison still need validation with live listings before production use. A scanned PDF needs OCR or a text-based copy.
+The first version is deployed at `https://hithanis.com/job-finder/` and can also run locally. The supplied text-based resume has been read and mapped into private evidence records. Search quality, resume wording, and the three-model comparison still need validation with live listings after rotated provider keys are configured. A scanned PDF needs OCR or a text-based copy.
 
 ## Features
 
