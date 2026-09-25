@@ -20,7 +20,7 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Duplicate API results, empty results, provider failure, location mismatch, a transferable senior role with a different title, and a junior role with overlapping keywords.
 
-**Status:** Implemented with recent-post filter, explicit inactive/expired-post exclusion, and evidence-linked first-pass ranking; live India coverage and employer-page verification pending. A recent index entry alone cannot prove that an employer still accepts applications.
+**Status:** Implemented with recent-post filter, explicit inactive/expired-post exclusion, and evidence-linked first-pass ranking. One live search saved 10 jobs and shortlisted 5; live India coverage, ranking quality and employer-page verification remain to be reviewed. A recent index entry alone cannot prove that an employer still accepts applications.
 
 ## PBI 3 — Job questions and growing experience memory
 
@@ -58,9 +58,9 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Acceptance criteria:** Default is five jobs at 08:00 IST; email/time/count/criteria can be edited; alert can be paused; fewer than five new jobs yields a shorter email; zero yields a clear email; daily sends are recorded.
 
-**Test scenarios:** Due alert in IST, changed delivery time, repeated scheduler invocation, zero/fewer new jobs, email provider failure and retry.
+**Test scenarios:** Due alert in IST, changed delivery time, repeated scheduler invocation, zero/fewer new jobs, and email provider failure without repeating paid searches that day.
 
-**Status:** Implemented; live email delivery pending sender configuration.
+**Status:** Implemented and connected to Gmail. A setup-test email was accepted. The daily alert is paused while the owner tests the app; no scheduled digest has been sent yet.
 
 ## PBI 7 — Admin activity and cost control
 
@@ -80,7 +80,7 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Threshold crossing, repeat check, new billing period, exhausted provider response, email failure and retry, and absent email sender configuration.
 
-**Status:** Implemented; live email delivery pending sender and rotated keys.
+**Status:** Implemented. JSearch and OpenRouter quota endpoints returned active, and Gmail accepted a setup-test message. A real threshold alert has not yet been observed; Gmail's remaining allowance is not available through this setup, so its local send count is recorded.
 
 ## PBI 8 — Deployment and quality gate
 
@@ -90,4 +90,4 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Clean install from Git, restart VM, edit alert then confirm send, restore backup, compare model top-five lists and resume edits, test mobile-width UI.
 
-**Status:** App deployed on the existing VM under `/job-finder/`; HTTPS, login, profile, timers, and backup service verified. Rotated search keys, email sender, a live ranking review, and recurring off-VM backup remain pending.
+**Status:** App deployed on the existing VM under `/job-finder/`; HTTPS, login, profile, timers, one live search, email authentication, and backup service verified. The owner still needs to review live ranking and real-resume output, verify a scheduled digest after resuming alerts, and arrange recurring off-VM backup.

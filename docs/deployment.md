@@ -16,7 +16,7 @@ The Git repository is public and has `main`, `dev`, and `feature/vm-deployment` 
 The app runs as the existing `rsa-key-20240330` account from its own `.venv`. Its service binds to the Docker `webnet` gateway `172.20.0.1:8765`, which is reachable by the Nginx container but is not a new public port. The systemd unit files in `deploy/` use these VM paths. After copying them to `/etc/systemd/system/`, run `systemctl daemon-reload`, enable `job-finder.service`, `job-finder-alerts.timer`, `job-finder-quota.timer`, and `job-finder-backup.timer`, then inspect their status. The timer services use a lock so overlapping checks do not run.
 
 The private `.env` needs `APP_PASSWORD`, `APP_SECRET`, `APP_BASE_URL=https://hithanis.com/job-finder`, `DATA_DIR=./data`, the rotated JSearch and OpenRouter keys, and email settings once a sender is ready. Restrict `.env` to mode `0600`. Set `QUOTA_ALERT_EMAIL` to the owner's address. The recipient for daily job emails remains editable in the app.
-An app password and secret were generated on the VM. The owner can view the password in their PuTTY session with `grep '^APP_PASSWORD=' ~/indian-work-engine/.env`; do not paste it into chat or Git. Provider keys remain blank until rotated replacements are entered directly on the VM.
+An app password and secret were generated for the website login on the VM. The owner can view the website password in their PuTTY session with `grep '^APP_PASSWORD=' ~/indian-work-engine/.env`; do not paste it into chat or Git. The JSearch and OpenRouter keys were added privately and each provider accepted a check. Gmail sending uses a separate Google app password, stored by `deploy/save_gmail_app_password.py` without displaying it.
 
 ## Proxy change
 
@@ -26,6 +26,6 @@ Certbot's renewal timer was active, but its deploy-hook folder was empty. Instal
 
 ## Checks and limits
 
-Verify the private `/healthz` endpoint from the Nginx container, the public `/job-finder/healthz` endpoint, login, resume upload, search, click tracking, alert editing, and the Activity page. Live searches and email delivery require rotated provider keys and a verified Resend sender. The code records quota checks and tries to email the owner at 80%, 95%, and 100% of readable limits; delivery failures remain visible in Activity. An uncapped OpenRouter key does not expose its remaining account credits through the key endpoint, so set a cap on that key or rely on local spend and provider-error checks.
+Verify the private `/healthz` endpoint from the Nginx container, the public `/job-finder/healthz` endpoint, login, resume upload, search, click tracking, alert editing, and the Activity page. Live search and Gmail sending are connected, but the daily alert is paused pending owner testing. The code records quota checks and tries to email the owner at 80%, 95%, and 100% of readable limits; delivery failures remain visible in Activity. An uncapped OpenRouter key does not expose its remaining account credits through the key endpoint, so set a cap on that key or rely on local spend and provider-error checks.
 
 The daily SQLite backup stays on the same VM. It does not protect against VM or disk loss, and uploads need separate off-VM backup. Copy both privately to another location and test a restore before treating the app as fully backed up.
