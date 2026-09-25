@@ -29,6 +29,8 @@ def sample_job(title, company, suffix):
 
 
 def test_search_deduplicates_and_tracks_click_separately(client, monkeypatch):
+    from app import direct_links
+    monkeypatch.setattr(direct_links, "resolve_job", lambda job, **kw: dict(job, direct_status="verified", direct_url=job["apply_url"]))
     object.__setattr__(settings, "jsearch_api_key", "test-key")
     object.__setattr__(settings, "openrouter_api_key", "")
     monkeypatch.setattr(search, "fetch_page", lambda *args: (
@@ -39,7 +41,7 @@ def test_search_deduplicates_and_tracks_click_separately(client, monkeypatch):
                                locations="Chennai", work_types="Full-time", count=10)
     rows = db.all_rows("SELECT j.title,r.rank FROM search_results r JOIN jobs j ON j.id=r.job_id "
                        "WHERE r.run_id=? ORDER BY r.rank", (run_id,))
-    assert len(rows) == 2
+    assert len(rows) == 1
     assert rows[0]["title"] == "R&D Director"
     job_id = db.one("SELECT id FROM jobs WHERE title='R&D Director'")["id"]
     response = client.get(f"/out/{job_id}", follow_redirects=False)

@@ -1,0 +1,1 @@
+<div class="logo {% if not job.logo_url %}no-image{% endif %}" aria-label="{{ job.company }} logo">{% if job.logo_url %}<img data-logo src="{{ job.logo_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}<span aria-hidden="true">{{ job.company[:1]|upper }}</span></div>

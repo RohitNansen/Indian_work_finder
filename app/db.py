@@ -32,6 +32,12 @@ def connect(path: Path | None = None):
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS candidate_account (
+ id INTEGER PRIMARY KEY CHECK(id=1), password_hash TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS login_attempts (
+ id INTEGER PRIMARY KEY, client TEXT NOT NULL, attempted_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY CHECK(id=1), name TEXT NOT NULL DEFAULT '',
   role_labels TEXT NOT NULL DEFAULT '', keywords TEXT NOT NULL DEFAULT '',
@@ -169,6 +175,23 @@ def init_db(path: Path | None = None) -> None:
         alert_columns = {row["name"] for row in db.execute("PRAGMA table_info(alerts)")}
         if "last_attempt_date_ist" not in alert_columns:
             db.execute("ALTER TABLE alerts ADD COLUMN last_attempt_date_ist TEXT")
+        variant_columns = {row["name"] for row in db.execute("PRAGMA table_info(resume_variants)")}
+        if "layout_version" not in variant_columns:
+            db.execute("ALTER TABLE resume_variants ADD COLUMN layout_version INTEGER NOT NULL DEFAULT 0")
+        job_columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
+        for column, definition in {
+            "direct_url": "TEXT", "direct_status": "TEXT NOT NULL DEFAULT 'pending'",
+            "direct_checked_at": "TEXT", "direct_note": "TEXT", "logo_url": "TEXT", "questions_prepared_at": "TEXT"
+        }.items():
+            if column not in job_columns:
+                db.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
+        import json
+        for row in db.execute("SELECT id,raw_json FROM jobs WHERE logo_url IS NULL"):
+            try:
+                logo=json.loads(row['raw_json']).get('employer_logo') or ''
+                if not logo.startswith('https://'):logo=''
+                db.execute("UPDATE jobs SET logo_url=? WHERE id=?",(logo,row['id']))
+            except (ValueError,TypeError):pass
         db.execute("INSERT OR IGNORE INTO profile(id,updated_at) VALUES(1,?)", (utcnow(),))
 
 

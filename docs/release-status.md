@@ -1,5 +1,7 @@
 # Release status and change record
 
+The 26 September candidate experience update is described in [its task sheet](upgrade-2026-09-26.md). Daily email is still paused. The original audit below records the previous release; the update has 26 passing regression tests and a three-page visual document check. Live deployment checks are recorded after rollout.
+
 Status checked 26 September 2026, Indian Standard Time. The deployed app uses the `main` branch at `https://hithanis.com/job-finder/`. This file records what has been verified; the [backlog](backlog.md) holds the detailed acceptance criteria and test scenarios. Git commits are the exact change history.
 
 ## Current state

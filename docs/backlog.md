@@ -91,3 +91,7 @@ The first release serves one experienced professional. It prioritizes usable job
 **Test scenarios:** Clean install from Git, restart VM, edit alert then confirm send, restore backup, compare model top-five lists and resume edits, test mobile-width UI.
 
 **Status:** App deployed on the existing VM under `/job-finder/`; HTTPS, login, profile, timers, one live search, email authentication, and backup service verified. The owner still needs to review live ranking and real-resume output, verify a scheduled digest after resuming alerts, and arrange recurring off-VM backup.
+
+## Candidate usability update
+
+The detailed PBIs, acceptance criteria, test coverage and constraints for the first user-test corrections are in [Candidate experience update](upgrade-2026-09-26.md). This includes separate candidate access, one search form, durable editable experience, employer-only application links, original-layout resume exports and the updated progress tables.

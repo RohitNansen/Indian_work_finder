@@ -29,3 +29,9 @@ Certbot's renewal timer was active, but its deploy-hook folder was empty. Instal
 Verify the private `/healthz` endpoint from the Nginx container, the public `/job-finder/healthz` endpoint, login, resume upload, search, click tracking, alert editing, and the Activity page. Live search and Gmail sending are connected, but the daily alert is paused pending owner testing. The code records quota checks and tries to email the owner at 80%, 95%, and 100% of readable limits; delivery failures remain visible in Activity. An uncapped OpenRouter key does not expose its remaining account credits through the key endpoint, so set a cap on that key or rely on local spend and provider-error checks.
 
 The daily SQLite backup stays on the same VM. It does not protect against VM or disk loss, and uploads need separate off-VM backup. Copy both privately to another location and test a restore before treating the app as fully backed up.
+
+## Candidate access and document rendering
+
+Run `.venv/bin/python -m deploy.create_candidate_login` once after the profile name is set. It creates a six-character password with a salted scrypt hash and saves initial credentials privately to `data/candidate-login.txt` (mode 0600). The owner can choose a replacement password under My profile; changing it invalidates existing candidate sessions. Owner sign-in uses `admin` and the existing `APP_PASSWORD`. Both roles use the same household profile; only the owner can access Activity and account setup.
+
+Install `libreoffice-writer-nogui` and `fonts-crosextra-caladea` on Debian for DOCX-to-PDF conversion. `LIBREOFFICE_BIN` can select another installed converter. PDF-source exports use PyMuPDF directly and retain the source layout. Give the 1 GB VM swap space before rendering documents alongside other services; this VM uses `/var/swap-job-finder`, 1 GB, with its own `/etc/fstab` entry. Do not remove existing service files, ports or mounts.

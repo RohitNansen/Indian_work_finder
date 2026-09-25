@@ -188,7 +188,10 @@ def save_job(raw: dict) -> dict:
              job["work_type"], job["posted_at"], job["description"], job["apply_url"],
              job["company_url"], json.dumps(raw, ensure_ascii=False), now, now),
         )
-    return job
+    logo = raw.get("employer_logo") or ""
+    logo = logo if logo.startswith("https://") else ""
+    write("UPDATE jobs SET logo_url=? WHERE id=?", (logo,jid))
+    return dict(one("SELECT * FROM jobs WHERE id=?", (jid,)))
 
 
 def deterministic_score(job: dict, roles: list[str], keywords: list[str], profile: str) -> float:
@@ -217,13 +220,15 @@ def profile_context() -> str:
     return "\n".join([
         resume["resume_text"] if resume else "",
         "Confirmed additional experience:", *[x["fact"] for x in facts],
+        "Answered experience questions (do not infer skills from No, Not sure or Removed):",
+        *[f"{x['requirement']}: {x['answer']}" for x in all_rows("SELECT requirement,answer FROM questions WHERE answered_at IS NOT NULL")],
         "Search preferences:", profile["role_labels"], profile["keywords"], profile["notes"],
     ])
 
 
 def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                work_types: str, count: int, days_recent: int = 7,
-               alert_id: int | None = None) -> int:
+               alert_id: int | None = None, existing_run_id: int | None = None) -> int:
     if not settings.jsearch_api_key:
         raise RuntimeError("JSearch is not configured yet")
     roles_list = labels(roles) or DEFAULT_ROLES
@@ -232,10 +237,11 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     count = max(1, min(int(count), 100))
     params = {"roles": roles_list, "keywords": keywords_list, "locations": location_list,
               "work_types": labels(work_types), "count": count, "days_recent": days_recent}
-    run_id = write(
+    run_id = existing_run_id or write(
         "INSERT INTO search_runs(kind,alert_id,started_at,parameters_json) VALUES(?,?,?,?)",
         (kind, alert_id, utcnow(), json.dumps(params, ensure_ascii=False)),
     )
+    write("UPDATE search_runs SET parameters_json=? WHERE id=?", (json.dumps(params,ensure_ascii=False),run_id))
     try:
         queue = query_queue(roles_list, location_list, keywords_list)
         seen: dict[str, dict] = {}
@@ -245,7 +251,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         quota_limited = False
         # Search enough alternatives to curate the requested number, within a clear API cap.
         minimum_coverage = min(len(roles_list), settings.jsearch_max_requests_per_run)
-        while queue and calls < settings.jsearch_max_requests_per_run and (len(seen) < count * 4 or calls < minimum_coverage):
+        while queue and calls < max(1, settings.jsearch_max_requests_per_run // 2) and (len(seen) < count * 4 or calls < minimum_coverage):
             query, remote, cursor = queue.popleft()
             try:
                 page, next_cursor = fetch_page(run_id, query, remote, cursor, days_recent)
@@ -307,15 +313,38 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                 score -= 20
             why = evaluation.get("why") or "Relevant senior experience and search preferences"
             questions = evaluation.get("unconfirmed") or []
+            # A requested result count is a ceiling, never a reason to fill with weak roles.
+            if evaluation and float(evaluation.get("relevance",0)) < 55:
+                continue
+            if not evaluation and base < 30:
+                continue
             ordered.append((score, job, why, questions, signal, evidence))
         ordered.sort(key=lambda x: x[0], reverse=True)
+        from .direct_links import resolve_job
+        def discover(job):
+            nonlocal calls
+            if calls >= settings.jsearch_max_requests_per_run:
+                return []
+            calls += 1
+            try:
+                rows, _ = fetch_page(run_id, f'{job["title"]} {job["company"]} careers India', False, None, days_recent)
+                return rows
+            except Exception:
+                return []
+        verified = []
+        for item in ordered[:settings.openrouter_max_jobs_per_run]:
+            resolved = resolve_job(item[1], discover=discover, run_id=run_id)
+            if resolved.get("direct_status") == "verified":
+                verified.append(item)
+            if len(verified) >= count:
+                break
         with connect() as db:
-            for rank, (score, job, why, questions, signal, evidence) in enumerate(ordered[:count], 1):
+            for rank, (score, job, why, questions, signal, evidence) in enumerate(verified, 1):
                 db.execute(
                     "INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,"
                     "retirement_signal,retirement_evidence) VALUES(?,?,?,?,?,?,?,?)",
                     (run_id, job["id"], rank, score, why,
-                     json.dumps(questions[:3], ensure_ascii=False), signal, evidence),
+                     json.dumps(questions[:9], ensure_ascii=False), signal, evidence),
                 )
                 db.executemany(
                     "INSERT INTO job_evidence_matches(run_id,job_id,evidence_id,relevance) "
@@ -327,7 +356,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                 "UPDATE search_runs SET completed_at=?,status=?,found_count=?,"
                 "shortlisted_count=?,error=? WHERE id=?",
                 (utcnow(), "partial_quota" if quota_limited else "complete", len(seen),
-                 min(count, len(ordered)), "JSearch quota reached during search" if quota_limited else None,
+                 len(verified), "JSearch quota reached during search" if quota_limited else None,
                  run_id),
             )
         return run_id
