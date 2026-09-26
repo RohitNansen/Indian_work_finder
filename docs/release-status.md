@@ -1,6 +1,25 @@
 # Release status and change record
 
-The 26 September candidate experience update is described in [its task sheet](upgrade-2026-09-26.md). Daily email is still paused. The original audit below records the previous release; the update has 26 passing regression tests and a three-page visual document check. Live deployment checks are recorded after rollout.
+## Candidate experience release — 26 September 2026
+
+Deployed at https://hithanis.com/job-finder/. The [task sheet](upgrade-2026-09-26.md) records PBIs, acceptance criteria and test scenarios. Git commits record each change.
+
+- 27 automated regression tests pass. Candidate access, durable answers, tracking, direct-link rejection, document preservation and background searches are covered.
+- Browser checks covered the candidate welcome, one filter form, search summary, opening a role and green saved-answer feedback.
+- Owner pages returned HTTPS 200; candidate Activity access returned 403 and its navigation was hidden.
+- The supplied three-page resume was visually checked after PDF editing and Word rendering. The unchanged PDF is byte-identical; the Word copy contains editable positioned text. Regenerate earlier exports.
+- A live lookup found and verified the exact Hitachi Energy R&D Team Lead, Service vacancy on the company website. A broad domain filter caused OpenRouter HTTP 500; the final lookup uses a simple employer-domain filter with Parallel search. Wrong-role results were rejected.
+- A bounded end-to-end search (two discovery queries, up to five AI candidates) completed: five listings retrieved, zero shortlisted because none passed both relevance and employer-page verification. This is a deliberately small coverage check, not evidence of market-wide coverage. Broader searches may take several minutes and can still return fewer jobs than requested.
+- Employer web lookup uses the existing OpenRouter account, up to three lookups per search by default. Parallel Basic search costs approximately $0.005 per lookup plus model tokens; provider-reported usage is logged. No resume data is sent to the web lookup.
+- Candidate username follows the profile name. Owner signs in as admin with the existing password and sets a six-character candidate password in My profile.
+- Daily job alerts remain paused. No application email was sent by this upgrade. Existing Nginx routes and other applications remain active.
+- The VM has a dedicated 1 GB swap file and LibreOffice Writer for document conversion. No disk expansion was purchased.
+
+### Limits and remaining owner checks
+
+Verify shortlist usefulness over several real searches and inspect each tailored resume before applying. The three-model quality comparison has not been performed. PDF-to-Word uses editable text boxes; exact rendering across every Word installation or future resume is not guaranteed. Employer ATS accounts and bot protection cannot be bypassed. Retiree eligibility remains unknown unless the employer states a relevant policy. Scheduled digest delivery remains untested while alerts are paused.
+
+## Earlier release audit (historical)
 
 Status checked 26 September 2026, Indian Standard Time. The deployed app uses the `main` branch at `https://hithanis.com/job-finder/`. This file records what has been verified; the [backlog](backlog.md) holds the detailed acceptance criteria and test scenarios. Git commits are the exact change history.
 

@@ -109,6 +109,19 @@ def test_aggregator_redirect_never_recorded_as_application_click(client,monkeypa
     assert db.one("SELECT COUNT(*) n FROM job_activity WHERE action='application_link_opened'")['n']==0
 
 
+def test_web_discovery_still_requires_matching_employer_page(test_env,monkeypatch):
+    job=save_job(sample_job('Research Director','Example Engineering','web-discovery'))
+    job['company_url']='https://example.com'
+    job['raw_json']='{}'
+    monkeypatch.setattr(direct_links,'read_page',lambda url:(url,employer_html('Sales Manager')))
+    result=direct_links.resolve_job(job,force=True,web_discover=lambda _:['https://example.com/jobs/123'])
+    assert result['direct_status']=='unverified' and not result['direct_url']
+    monkeypatch.setattr(direct_links,'read_page',lambda url:(url,employer_html()))
+    result=direct_links.resolve_job(job,force=True,web_discover=lambda _:['https://example.com/jobs/123'])
+    assert result['direct_status']=='verified'
+    assert result['direct_url']=='https://example.com/jobs/123'
+
+
 def test_docx_change_preserves_unchanged_run_styles():
     document=Document();p=document.add_paragraph();r=p.add_run('R&D leadership: ');r.bold=True;r.font.size=Pt(14)
     r=p.add_run('Led electrical research teams.');r.font.name='Cambria';r.font.color.rgb=RGBColor.from_string('123456')

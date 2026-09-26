@@ -39,6 +39,7 @@ class Settings:
     resend_monthly_quota: int = int(os.getenv("RESEND_MONTHLY_QUOTA", "3000"))
     jsearch_max_requests_per_run: int = int(os.getenv("JSEARCH_MAX_REQUESTS_PER_RUN", "20"))
     openrouter_max_jobs_per_run: int = int(os.getenv("OPENROUTER_MAX_JOBS_PER_RUN", "40"))
+    employer_web_lookups_per_run: int = int(os.getenv("EMPLOYER_WEB_LOOKUPS_PER_RUN", "3"))
     monthly_spend_limit_usd: float = float(os.getenv("MONTHLY_SPEND_LIMIT_USD", "8"))
 
 

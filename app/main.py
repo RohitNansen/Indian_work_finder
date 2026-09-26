@@ -586,7 +586,7 @@ async def edit_fact(request: Request, fact_id: int):
 @app.post("/jobs/{job_id}/verify")
 async def verify_company_link(request: Request, job_id: str):
     await check_post(request)
-    from .direct_links import resolve_job
+    from .direct_links import resolve_job, find_employer_on_web
     from .search import fetch_page
     job = one("SELECT * FROM jobs WHERE id=?", (job_id,))
     if not job:
@@ -599,7 +599,7 @@ async def verify_company_link(request: Request, job_id: str):
             return rows
         except Exception:
             return []
-    await run_in_threadpool(resolve_job, dict(job), force=True, discover=discover)
+    await run_in_threadpool(resolve_job, dict(job), force=True, discover=discover, web_discover=find_employer_on_web)
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 

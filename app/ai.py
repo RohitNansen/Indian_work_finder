@@ -38,7 +38,7 @@ def month_spend() -> float:
 
 def ask_json(*, run_id: int | None, operation: str, instructions: str,
              content: dict[str, Any], schema: dict[str, Any],
-             model: str | None = None) -> dict[str, Any]:
+             model: str | None = None, web_search: dict | None = None) -> dict[str, Any]:
     if not settings.openrouter_api_key:
         raise RuntimeError("OpenRouter is not configured yet")
     if month_spend() >= settings.monthly_spend_limit_usd:
@@ -47,7 +47,7 @@ def ask_json(*, run_id: int | None, operation: str, instructions: str,
     call_id = write(
         "INSERT INTO api_calls(run_id,provider,operation,request_json,started_at) VALUES(?,?,?,?,?)",
         (run_id, "OpenRouter", operation,
-         json.dumps({"model": model, "content_keys": list(content)}, ensure_ascii=False), utcnow()),
+         json.dumps({"model": model, "content_keys": list(content), "web_search": web_search, **({"query":content} if web_search else {})}, ensure_ascii=False), utcnow()),
     )
     payload = {
         "model": model,
@@ -62,6 +62,8 @@ def ask_json(*, run_id: int | None, operation: str, instructions: str,
         "provider": {"require_parameters": True},
         "temperature": 0,
     }
+    if web_search:
+        payload["plugins"] = [{"id":"web", "engine":"parallel", "mode":"basic", "max_results":5, **web_search}]
     try:
         with httpx.Client(timeout=90) as client:
             response = client.post(
@@ -73,17 +75,20 @@ def ask_json(*, run_id: int | None, operation: str, instructions: str,
         response.raise_for_status()
         result = response.json()
         message = result["choices"][0]["message"]["content"]
-        parsed = json.loads(message)
         usage = result.get("usage") or {}
         in_tokens = int(usage.get("prompt_tokens") or 0)
         out_tokens = int(usage.get("completion_tokens") or 0)
         cost = usage.get("cost")
-        cost = float(cost) if cost is not None else estimated_cost(model, in_tokens, out_tokens)
+        cost = float(cost) if cost is not None else estimated_cost(model, in_tokens, out_tokens) + (0.005 if web_search else 0)
         write(
             "UPDATE api_calls SET http_status=?,input_tokens=?,output_tokens=?,"
             "estimated_cost_usd=?,completed_at=? WHERE id=?",
             (response.status_code, in_tokens, out_tokens, cost, utcnow(), call_id),
         )
+        parsed = json.loads(message)
+        if web_search:
+            parsed['_web_sources'] = [a['url_citation']['url'] for a in result['choices'][0]['message'].get('annotations',[]) if a.get('type')=='url_citation' and a.get('url_citation',{}).get('url')]
+            write("UPDATE api_calls SET request_json=? WHERE id=?",(json.dumps({"model":model,"query":content,"web_search":web_search,"returned_urls":parsed.get("urls",[]),"source_urls":parsed['_web_sources']}),call_id))
         return parsed
     except Exception as exc:
         status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None

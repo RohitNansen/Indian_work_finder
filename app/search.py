@@ -320,7 +320,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                 continue
             ordered.append((score, job, why, questions, signal, evidence))
         ordered.sort(key=lambda x: x[0], reverse=True)
-        from .direct_links import resolve_job
+        from .direct_links import resolve_job, find_employer_on_web
         def discover(job):
             nonlocal calls
             if calls >= settings.jsearch_max_requests_per_run:
@@ -331,9 +331,16 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                 return rows
             except Exception:
                 return []
+        web_calls=0
+        def web_discover(job):
+            nonlocal web_calls
+            if web_calls >= settings.employer_web_lookups_per_run:
+                return []
+            web_calls+=1
+            return find_employer_on_web(job,run_id)
         verified = []
         for item in ordered[:settings.openrouter_max_jobs_per_run]:
-            resolved = resolve_job(item[1], discover=discover, run_id=run_id)
+            resolved = resolve_job(item[1], discover=discover, run_id=run_id, web_discover=web_discover)
             if resolved.get("direct_status") == "verified":
                 verified.append(item)
             if len(verified) >= count:
