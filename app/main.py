@@ -495,6 +495,18 @@ def api_use_page(request: Request):
                 monthly_limit=settings.monthly_spend_limit_usd)
 
 
+@app.get("/companies", response_class=HTMLResponse)
+def companies_page(request: Request):
+    if response := auth_or_redirect(request):
+        return response
+    require_admin(request)
+    return page(request, "companies.html", companies=all_rows(
+        "SELECT c.*,COUNT(o.id) AS listings_seen FROM companies c "
+        "LEFT JOIN company_observations o ON o.company_id=c.id "
+        "GROUP BY c.id ORDER BY c.verified_at IS NULL,c.last_seen_at DESC,c.name LIMIT 500"),
+        total=one("SELECT COUNT(*) AS n FROM companies")["n"])
+
+
 @app.post("/jobs/{job_id}/resume/propose")
 async def propose_variant(request: Request, job_id: str):
     await check_post(request)

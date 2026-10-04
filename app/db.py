@@ -68,6 +68,21 @@ CREATE TABLE IF NOT EXISTS jobs (
   company_url TEXT, raw_json TEXT NOT NULL DEFAULT '{}', first_seen_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS companies (
+  id INTEGER PRIMARY KEY, name_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL, website_hint TEXT, verified_website TEXT,
+  career_page TEXT, verified_job_url TEXT, ats_provider TEXT, ats_board TEXT,
+  first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+  verified_at TEXT
+);
+CREATE TABLE IF NOT EXISTS company_observations (
+  id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL,
+  source TEXT NOT NULL, source_job_key TEXT NOT NULL,
+  observed_name TEXT NOT NULL, website_hint TEXT,
+  first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+  UNIQUE(source,source_job_key),
+  FOREIGN KEY(company_id) REFERENCES companies(id)
+);
 CREATE TABLE IF NOT EXISTS search_runs (
   id INTEGER PRIMARY KEY, kind TEXT NOT NULL, alert_id INTEGER,
   started_at TEXT NOT NULL, completed_at TEXT, parameters_json TEXT NOT NULL,
@@ -155,6 +170,7 @@ CREATE TABLE IF NOT EXISTS resume_variants (
   FOREIGN KEY(base_resume_id) REFERENCES resumes(id)
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_seen ON jobs(last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_company_observations_company ON company_observations(company_id);
 CREATE INDEX IF NOT EXISTS idx_activity_job ON job_activity(job_id,occurred_at);
 CREATE INDEX IF NOT EXISTS idx_api_run ON api_calls(run_id);
 CREATE INDEX IF NOT EXISTS idx_quota_provider ON quota_checks(provider,checked_at);

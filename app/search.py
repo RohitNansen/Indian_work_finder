@@ -5,7 +5,7 @@ import json
 import re
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
 
@@ -14,6 +14,7 @@ from .config import settings
 from .db import all_rows, connect, one, utcnow, write
 from .evidence import current_evidence, evidence_matches
 from .matching import normalize, words, role_variants, location_matches, recent
+from .company_memory import remember_raw
 
 DEFAULT_ROLES = [
     "R&D Director", "Research and Development Consultant", "Head of Quality",
@@ -30,7 +31,14 @@ def labels(value: str) -> list[str]:
 
 
 def normalized_link(value: str) -> str:
-    return (value or "").split("?", 1)[0].rstrip("/").lower()
+    parsed=urlparse(value or "")
+    if not parsed.hostname:return (value or "").rstrip("/").lower()
+    # Keep identity parameters: some employer systems identify the vacancy by query string.
+    identity={"id","jobid","job_id","requisitionid","reqid","rid","gh_jid"}
+    params=sorted((key.lower(),val) for key,val in parse_qsl(parsed.query)
+                  if key.lower() in identity)
+    return (parsed.hostname.lower().removeprefix("www.")+parsed.path.rstrip("/").lower()+
+            ("?"+urlencode(params) if params else ""))
 
 
 def job_key(raw: dict) -> str:
@@ -150,6 +158,9 @@ def fetch_page(run_id: int, query: str, remote: bool, cursor: str | None,
         else:
             jobs = payload.get("jobs") or payload.get("results") or []
             next_cursor = payload.get("cursor") or payload.get("next_cursor")
+        for raw in jobs:
+            if isinstance(raw, dict):
+                remember_raw(raw)
         write(
             "UPDATE api_calls SET response_count=?,http_status=?,estimated_cost_usd=?,"
             "completed_at=? WHERE id=?",
@@ -166,6 +177,7 @@ def fetch_page(run_id: int, query: str, remote: bool, cursor: str | None,
 
 
 def save_job(raw: dict) -> dict:
+    remember_raw(raw)
     jid = job_key(raw)
     job = {
         "id": jid, "source": raw.get("source","JSearch"), "title": raw.get("job_title") or "",
@@ -247,10 +259,15 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         state.update(stage=stage,current=current)
         write('UPDATE search_runs SET progress_json=?,found_count=?,shortlisted_count=? WHERE id=?',(json.dumps(state),state['found'],state['matched'],run_id))
     previous_ids={row['job_id'] for row in all_rows('SELECT DISTINCT job_id FROM search_results WHERE run_id<?',(run_id,))}
+    previous_urls={normalized_link(row['direct_url']) for row in all_rows(
+        "SELECT DISTINCT j.direct_url FROM search_results r JOIN jobs j ON j.id=r.job_id "
+        "WHERE r.run_id<? AND j.direct_url IS NOT NULL",(run_id,))}
     started=time.monotonic();seen={};processed=set();selected=[];calls=0;web_calls=0;quota_limited=False;failures=0
     context=profile_context();resume_evidence=current_evidence()
     def new_matches():
-        return sum(item['job']['id'] not in previous_ids for item in selected)
+        return sum(item['job']['id'] not in previous_ids and
+                   normalized_link(item['job'].get('direct_url')) not in previous_urls
+                   for item in selected)
     def web_lookup(job):
         nonlocal web_calls
         if web_calls>=settings.employer_web_lookups_per_run:return []
@@ -283,7 +300,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             evidence=json.loads(resolved.get('verified_json') or '{}')
             if not location_matches(resolved['location'],location_list,evidence.get('remote',False)):continue
             if not recent(resolved.get('posted_at'),days_recent):continue
-            if any(x['job']['direct_url']==resolved['direct_url'] for x in selected):continue
+            if any(normalized_link(x['job']['direct_url'])==normalized_link(resolved['direct_url']) for x in selected):continue
             verified.append(resolved)
         if not verified:return
         progress('Matching verified job descriptions')
@@ -300,7 +317,9 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if not evaluation and base<35:continue
             score=float(evaluation.get('relevance',base))
             selected.append({'job':job,'score':score,'evaluation':evaluation})
-        selected.sort(key=lambda x:(x['job']['id'] not in previous_ids,x['score'],x['job'].get('posted_at') or ''),reverse=True)
+        selected.sort(key=lambda x:(x['job']['id'] not in previous_ids and
+                   normalized_link(x['job'].get('direct_url')) not in previous_urls,
+                   x['score'],x['job'].get('posted_at') or ''),reverse=True)
         state['matched']=min(count,len(selected));progress('Continuing search')
     try:
         queue=query_queue(roles_list,location_list,keywords_list)
@@ -345,7 +364,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             for rank,item in enumerate(selected[:count],1):
                 job=item['job'];e=item['evaluation'];signal=e.get('retirement_signal','unknown');quote=e.get('retirement_evidence','')
                 if not quote or quote.lower() not in job['description'].lower():signal='unknown';quote=''
-                db.execute('INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,retirement_signal,retirement_evidence,seen_before) VALUES(?,?,?,?,?,?,?,?,?)',(run_id,job['id'],rank,item['score'],e.get('why','Relevant experience and responsibilities'),json.dumps(e.get('unconfirmed',[])[:9]),signal,quote,int(job['id'] in previous_ids)))
+                db.execute('INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,retirement_signal,retirement_evidence,seen_before) VALUES(?,?,?,?,?,?,?,?,?)',(run_id,job['id'],rank,item['score'],e.get('why','Relevant experience and responsibilities'),json.dumps(e.get('unconfirmed',[])[:9]),signal,quote,int(job['id'] in previous_ids or normalized_link(job.get('direct_url')) in previous_urls)))
                 db.executemany('INSERT INTO job_evidence_matches(run_id,job_id,evidence_id,relevance) VALUES(?,?,?,?)',[(run_id,job['id'],row['id'],strength) for strength,row in evidence_matches(job,resume_evidence)])
             status='partial_quota' if quota_limited else 'complete'
             if failures and not seen:status='failed'

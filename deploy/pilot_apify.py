@@ -16,6 +16,7 @@ from pathlib import Path
 import httpx
 
 from app import db
+from app.company_memory import remember_company
 from app.config import settings
 from app.direct_links import BOARDS, greenhouse_vacancy_details, host, read_page, under, vacancy_details
 
@@ -114,6 +115,11 @@ def run_query(number: int) -> Path:
         db.write('UPDATE api_calls SET request_json=?,response_count=?,http_status=?,estimated_cost_usd=?,completed_at=? WHERE id=?',
                  (json.dumps({'actor':ACTOR,**payload,'apify_run_id':run_id}),len(items),200,estimate,db.utcnow(),call_id))
         summary=compare(items)
+        for item in items:
+            if isinstance(item,dict):
+                remember_company(str(item.get('companyName') or ''),'Apify Naukri',
+                                 str(item.get('jobId') or item.get('portalUrl') or ''),
+                                 item.get('companyWebsite'))
         output=settings.data_dir/'pilots'/f'apify-naukri-query-{number}-{datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")}.json'
         output.parent.mkdir(parents=True,exist_ok=True)
         output.write_text(json.dumps({'query':payload,'apify_run_id':run_id,

@@ -10,6 +10,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from .db import utcnow, write
+from .company_memory import verified_boards
 
 # Curated employer boards can be expanded after measuring actual suitable yield.
 BOARDS = (
@@ -55,8 +56,14 @@ def _raw_job(provider, board, company, website, row):
 def discover_ats_vacancies(run_id: int | None = None) -> list[dict]:
     """Use public, company-scoped feeds. No API key and no unbounded crawl."""
     found=[]
+    boards=list(BOARDS)
+    known={(provider,board) for provider,board,_,_ in boards}
+    for entry in verified_boards():
+        if entry[:2] not in known:
+            boards.append(entry)
+            known.add(entry[:2])
     with httpx.Client(timeout=15, trust_env=False) as client:
-        for provider, board, company, website in BOARDS:
+        for provider, board, company, website in boards[:40]:
             url=(f'https://api.lever.co/v0/postings/{board}?mode=json' if provider=='Lever'
                  else f'https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true')
             call_id=write('INSERT INTO api_calls(run_id,provider,operation,request_json,started_at) VALUES(?,?,?,?,?)',

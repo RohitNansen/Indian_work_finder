@@ -227,6 +227,7 @@ def candidate_urls(raw):
 
 
 def resolve_job(job,force=False,discover=None,run_id=None,web_discover=None):
+    from .company_memory import remember_verified_vacancy, verified_company
     if not force and job.get('verification_version') == 3 and job.get('direct_checked_at'):
         try:
             recent=datetime.fromisoformat(job['direct_checked_at'])>datetime.now(timezone.utc)-timedelta(hours=12)
@@ -243,6 +244,9 @@ def resolve_job(job,force=False,discover=None,run_id=None,web_discover=None):
         return dict(job,direct_status='unverified',direct_url=None)
     if (job.get('company_url') or '').startswith('http://'):
         job['company_url']='https://'+job['company_url'][7:]
+    known=verified_company(job['company'])
+    if known and known['verified_website']:
+        job['company_url']=known['verified_website']
     urls=([job['direct_url']] if job.get('direct_url') else [])+candidate_urls(raw)
     queue=[url for url in dict.fromkeys(urls) if not under(host(url),BOARDS)]
     visited=set(); note='No verified company application page found'; found=None; evidence={}
@@ -287,6 +291,7 @@ def resolve_job(job,force=False,discover=None,run_id=None,web_discover=None):
     if not found and job.get('company_url') and job['company_url'] not in visited:
         queue.append(job['company_url']);inspect_queue(15)
     if found:
+        remember_verified_vacancy(job['company'],found,job.get('company_url'))
         write('UPDATE jobs SET title=?,description=?,location=?,posted_at=?,work_type=?,verified_json=?,verification_version=3 WHERE id=?',
               (evidence['title'],evidence['description'],evidence['location'],evidence['posted_at'],evidence['work_type'],json.dumps(evidence),job['id']))
         job.update({k:evidence[k] for k in ('title','description','location','posted_at','work_type')})
@@ -312,7 +317,9 @@ def find_employer_on_web(job, run_id=None):
     from .config import settings
     if not settings.openrouter_api_key:
         return []
-    official=host(job.get('company_url'))
+    from .company_memory import verified_company
+    known=verified_company(job['company'])
+    official=host(known['verified_website'] if known and known['verified_website'] else job.get('company_url'))
     filters={'max_results':5}
     if official and not under(official, BOARDS | ATS):
         filters={'include_domains':[official]}

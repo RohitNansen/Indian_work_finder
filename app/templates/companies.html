@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block title %}Company memory · Job Finder{% endblock %}{% block content %}
+<div class="hero"><p class="eyebrow">Owner view</p><h1>Company memory</h1><p class="muted">{{ total }} unique company names observed across job sources. Some source names may be recruiters. A career page is reused only after an individual employer vacancy has been verified.</p></div>
+<div class="card scroll"><table><thead><tr><th>Company</th><th>Listings seen</th><th>Career page</th><th>Last seen</th></tr></thead><tbody>
+{% for company in companies %}<tr><td><strong>{{ company.name }}</strong>{% if company.ats_provider %}<br><small>{{ company.ats_provider }} board</small>{% endif %}</td><td>{{ company.listings_seen }}</td><td>{% if company.career_page %}<a href="{{ company.career_page }}" target="_blank" rel="noopener">Verified career page ↗</a>{% elif company.verified_job_url %}<a href="{{ company.verified_job_url }}" target="_blank" rel="noopener">Verified company vacancy ↗</a>{% else %}<span class="muted">Not verified yet</span>{% endif %}</td><td>{{ company.last_seen_at|ist }}</td></tr>{% else %}<tr><td colspan="4">Companies will appear after a job search.</td></tr>{% endfor %}
+</tbody></table>{% if total>companies|length %}<p class="muted">Showing the 500 most recent companies.</p>{% endif %}</div>
+{% endblock %}
