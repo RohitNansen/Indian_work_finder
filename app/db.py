@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS companies (
   name TEXT NOT NULL, website_hint TEXT, verified_website TEXT,
   career_page TEXT, verified_job_url TEXT, ats_provider TEXT, ats_board TEXT,
   first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
-  verified_at TEXT
+  verified_at TEXT, last_scanned_at TEXT
 );
 CREATE TABLE IF NOT EXISTS company_observations (
   id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL,
@@ -181,6 +181,9 @@ CREATE INDEX IF NOT EXISTS idx_resume_evidence ON resume_evidence(resume_id,sect
 def init_db(path: Path | None = None) -> None:
     with connect(path) as db:
         db.executescript(SCHEMA)
+        company_columns={row['name'] for row in db.execute('PRAGMA table_info(companies)')}
+        if 'last_scanned_at' not in company_columns:
+            db.execute('ALTER TABLE companies ADD COLUMN last_scanned_at TEXT')
         columns = {row["name"] for row in db.execute("PRAGMA table_info(search_results)")}
         if "retirement_signal" not in columns:
             db.execute("ALTER TABLE search_results ADD COLUMN retirement_signal TEXT NOT NULL DEFAULT 'unknown'")

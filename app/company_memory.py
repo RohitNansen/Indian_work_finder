@@ -102,3 +102,29 @@ def verified_boards() -> list[tuple[str, str, str, str]]:
             "AND ats_board IS NOT NULL ORDER BY name"
         ).fetchall()
     return [(r["ats_provider"], r["ats_board"], r["name"], r["website"]) for r in rows]
+
+
+def watched_company_sites(limit: int = 2) -> list[dict]:
+    """Rotate through verified employer domains without crawling every site per run."""
+    with connect() as db:
+        rows = db.execute(
+            "SELECT id,name,verified_website,last_scanned_at FROM companies "
+            "WHERE verified_at IS NOT NULL AND verified_website IS NOT NULL "
+            "AND ats_provider IS NULL "
+            "ORDER BY last_scanned_at IS NOT NULL,last_scanned_at,last_seen_at DESC"
+        ).fetchall()
+    result = []
+    hosts = set()
+    for row in rows:
+        hostname = urlparse(row["verified_website"]).hostname
+        if hostname and hostname not in hosts:
+            result.append(dict(row))
+            hosts.add(hostname)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def mark_company_scanned(company_id: int) -> None:
+    with connect() as db:
+        db.execute("UPDATE companies SET last_scanned_at=? WHERE id=?", (utcnow(), company_id))

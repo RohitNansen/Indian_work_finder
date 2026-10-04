@@ -245,8 +245,10 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                work_types: str, count: int, days_recent: int = 30,
                alert_id: int | None = None, existing_run_id: int | None = None) -> int:
     import time
-    from .direct_links import resolve_job, find_employer_on_web, discover_employer_vacancies
+    from .direct_links import (resolve_job, find_employer_on_web,
+                               discover_employer_vacancies, discover_watched_company_vacancies)
     from .ats_feeds import discover_ats_vacancies
+    from .company_memory import watched_company_sites
     if not settings.jsearch_api_key:raise RuntimeError("JSearch is not configured yet")
     roles_list=labels(roles) or DEFAULT_ROLES
     location_list=labels(locations) or ['Chennai','Tamil Nadu','Bengaluru','Remote India']
@@ -265,9 +267,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     started=time.monotonic();seen={};processed=set();selected=[];calls=0;web_calls=0;quota_limited=False;failures=0
     context=profile_context();resume_evidence=current_evidence()
     def new_matches():
-        return sum(item['job']['id'] not in previous_ids and
-                   normalized_link(item['job'].get('direct_url')) not in previous_urls
-                   for item in selected)
+        return len(selected)
     def web_lookup(job):
         nonlocal web_calls
         if web_calls>=settings.employer_web_lookups_per_run:return []
@@ -287,7 +287,8 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         state['found']=len(seen)
         return added
     def assess(limit=8):
-        available=[j for jid,j in seen.items() if jid not in processed]
+        available=[j for jid,j in seen.items() if jid not in processed and jid not in previous_ids
+                   and normalized_link(j.get('direct_url')) not in previous_urls]
         available=[j for j in available if not any(term in normalize(j['title']) for term in ('junior','intern','trainee','entry level'))]
         available.sort(key=lambda j:deterministic_score(j,roles_list,keywords_list,context),reverse=True)
         verified=[]
@@ -297,6 +298,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             progress('Checking company vacancies',job['title']+' · '+job['company'])
             resolved=resolve_job(job,force=job['id'] in previous_ids,run_id=run_id,web_discover=web_lookup)
             if resolved.get('direct_status')!='verified':continue
+            if normalized_link(resolved.get('direct_url')) in previous_urls:continue
             evidence=json.loads(resolved.get('verified_json') or '{}')
             if not location_matches(resolved['location'],location_list,evidence.get('remote',False)):continue
             if not recent(resolved.get('posted_at'),days_recent):continue
@@ -317,16 +319,20 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if not evaluation and base<35:continue
             score=float(evaluation.get('relevance',base))
             selected.append({'job':job,'score':score,'evaluation':evaluation})
-        selected.sort(key=lambda x:(x['job']['id'] not in previous_ids and
-                   normalized_link(x['job'].get('direct_url')) not in previous_urls,
-                   x['score'],x['job'].get('posted_at') or ''),reverse=True)
+        selected.sort(key=lambda x:(x['score'],x['job'].get('posted_at') or ''),reverse=True)
         state['matched']=min(count,len(selected));progress('Continuing search')
     try:
         queue=query_queue(roles_list,location_list,keywords_list)
         no_new=0
-        progress('Checking employer job boards','Dozee and Instawork')
+        progress('Checking employer job boards')
         ingest(discover_ats_vacancies(run_id))
         assess(8)
+        for company in watched_company_sites(2):
+            if new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
+            web_calls+=1;state['queries']+=1
+            progress('Checking known company career pages',company['name'])
+            ingest(discover_watched_company_vacancies(roles_list,location_list,days_recent,company,run_id))
+            assess(5)
         # A small direct-career search complements the aggregator with different sources.
         groups=[roles_list[i:i+2] for i in range(0,len(roles_list),2)]
         for group in groups:
@@ -347,24 +353,17 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if calls%3==0:assess(8)
             if next_cursor and added and calls>=len(roles_list):queue.append((query,remote,next_cursor))
             if no_new>=4 and calls>=len(roles_list):state['stop_reason']='Several searches found no new suitable vacancies';break
-        # If today's sources omit a previously shown vacancy, check the employer
-        # page again before offering it as a still-open result.
-        if not selected and previous_ids and state['checked']<settings.openrouter_max_jobs_per_run:
-            prior=all_rows("SELECT j.* FROM search_results r JOIN jobs j ON j.id=r.job_id WHERE r.run_id<? AND j.direct_status='verified' AND j.verification_version=3 GROUP BY j.id ORDER BY MAX(r.run_id) DESC LIMIT 20",(run_id,))
-            for row in prior:
-                job=dict(row)
-                if job['id'] not in seen and location_matches(job['location'],location_list,json.loads(job.get('verified_json') or '{}').get('remote',False)) and recent(job.get('posted_at'),days_recent):
-                    seen[job['id']]=job
-            state['found']=len(seen)
         if quota_limited and not seen:raise RuntimeError(state['stop_reason']+' before any listings could be retrieved')
         if len(selected)<count:assess(settings.openrouter_max_jobs_per_run-state['checked'])
         if not state['stop_reason']:
-            state['stop_reason']='Requested number of new jobs found' if new_matches()>=count else 'Search budget completed' if queue else 'Available searches completed'
+            state['stop_reason']=('Requested number of new jobs found' if new_matches()>=count
+                                  else 'No new suitable vacancies found within this search budget' if not selected
+                                  else 'Search budget completed' if queue else 'Available searches completed')
         with connect() as db:
             for rank,item in enumerate(selected[:count],1):
                 job=item['job'];e=item['evaluation'];signal=e.get('retirement_signal','unknown');quote=e.get('retirement_evidence','')
                 if not quote or quote.lower() not in job['description'].lower():signal='unknown';quote=''
-                db.execute('INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,retirement_signal,retirement_evidence,seen_before) VALUES(?,?,?,?,?,?,?,?,?)',(run_id,job['id'],rank,item['score'],e.get('why','Relevant experience and responsibilities'),json.dumps(e.get('unconfirmed',[])[:9]),signal,quote,int(job['id'] in previous_ids or normalized_link(job.get('direct_url')) in previous_urls)))
+                db.execute('INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,retirement_signal,retirement_evidence,seen_before) VALUES(?,?,?,?,?,?,?,?,0)',(run_id,job['id'],rank,item['score'],e.get('why','Relevant experience and responsibilities'),json.dumps(e.get('unconfirmed',[])[:9]),signal,quote))
                 db.executemany('INSERT INTO job_evidence_matches(run_id,job_id,evidence_id,relevance) VALUES(?,?,?,?)',[(run_id,job['id'],row['id'],strength) for strength,row in evidence_matches(job,resume_evidence)])
             status='partial_quota' if quota_limited else 'complete'
             if failures and not seen:status='failed'

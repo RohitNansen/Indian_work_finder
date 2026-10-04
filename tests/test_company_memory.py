@@ -1,5 +1,5 @@
 from app.company_memory import (remember_company, remember_verified_vacancy,
-                                verified_boards, verified_company)
+                                verified_boards, verified_company, watched_company_sites)
 from app.db import one
 from app.search import normalized_link
 
@@ -33,3 +33,20 @@ def test_vacancy_identity_keeps_job_id_but_drops_tracking():
 def test_company_page_is_owner_only(client):
     response = client.get("/companies")
     assert response.status_code == 403
+
+
+def test_watchlist_rotates_and_keeps_only_employer_urls(test_env, monkeypatch):
+    from app import ai
+    from app.direct_links import discover_watched_company_vacancies
+    for name in ("Alpha Energy", "Beta Devices"):
+        remember_verified_vacancy(name, f"https://{name.split()[0].lower()}.example/careers/job/123")
+    first = watched_company_sites(1)[0]
+    domain = first['verified_website'].split('//')[1]
+    monkeypatch.setattr(ai, 'ask_json', lambda **kwargs: {'jobs': [
+        {'title':'Head of Quality','location':'Chennai','url':f'https://{domain}/careers/job/456'},
+        {'title':'Head of Quality','location':'Chennai','url':'https://unrelated.example/job/456'},
+    ]})
+    rows = discover_watched_company_vacancies(['Head of Quality'], ['Chennai'], 30, first)
+    assert len(rows) == 1
+    assert rows[0]['job_apply_link'].startswith(f'https://{domain}/')
+    assert watched_company_sites(1)[0]['id'] != first['id']
