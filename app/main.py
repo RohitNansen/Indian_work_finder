@@ -377,11 +377,21 @@ def my_jobs(request: Request):
     if response := auth_or_redirect(request):
         return response
     view = "recommended" if request.query_params.get("view") == "recommended" else "opened"
+    sort = request.query_params.get('sort','status')
+    if sort not in {'status','added','opened'}:
+        sort='status'
+    active_rank=("CASE COALESCE(s.status,'Opened') WHEN 'Offer' THEN 0 "
+                 "WHEN 'Interviewing' THEN 1 WHEN 'Applied' THEN 2 "
+                 "WHEN 'Saved' THEN 3 ELSE 4 END")
+    archived_rank="CASE WHEN s.status IN ('Rejected','Closed') THEN 1 ELSE 0 END"
+    order={'status':f'{archived_rank},{active_rank},last_opened DESC',
+           'added':f'{archived_rank},j.first_seen_at DESC,last_opened DESC',
+           'opened':f'{archived_rank},last_opened DESC'}[sort]
     opened_jobs = all_rows(
         "SELECT j.*,s.status,MAX(a.occurred_at) AS last_opened,COUNT(a.id) AS clicks "
         "FROM job_activity a JOIN jobs j ON j.id=a.job_id "
         "LEFT JOIN job_status s ON s.job_id=j.id "
-        "WHERE a.action IN ('listing_opened','application_link_opened') GROUP BY j.id ORDER BY last_opened DESC"
+        "WHERE a.action IN ('listing_opened','application_link_opened') GROUP BY j.id ORDER BY " + order
     )
     recommended_rows = all_rows(
         "SELECT j.*,r.why,r.internal_score,sr.kind AS search_kind,"
@@ -407,7 +417,7 @@ def my_jobs(request: Request):
             seen_urls.add(url)
         recommended.append(row)
     return page(request, "my_jobs.html", jobs=opened_jobs if view=="opened" else recommended,
-                view=view, opened_count=len(opened_jobs), recommended_count=len(recommended))
+                view=view, sort=sort, opened_count=len(opened_jobs), recommended_count=len(recommended))
 
 
 @app.get("/alerts", response_class=HTMLResponse)
