@@ -57,7 +57,8 @@ def test_login_only_password_and_hidden_owner_pages(test_env,monkeypatch):
         assert 'Surendran’s sign-in' not in client.get('/profile').text
         assert '<option selected>10</option>' in client.get('/').text
         assert 'Last 2 months' in client.get('/').text and 'Last 3 months' in client.get('/').text
-        assert 'id="create-alert" disabled' in client.get('/alerts').text
+        assert 'id="create-alert"' in client.get('/alerts').text
+        assert 'id="create-alert" disabled' not in client.get('/alerts').text
     object.__setattr__(settings,'app_password',original)
 
 

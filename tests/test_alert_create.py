@@ -2,11 +2,10 @@ from app import db
 from conftest import csrf
 
 
-def test_create_alert_can_be_unlocked_by_any_changed_setting_and_starts_paused(client):
+def test_create_alert_is_always_available_and_starts_paused(client):
     page=client.get('/alerts').text
-    assert 'id="create-alert" disabled' in page
+    assert 'id="create-alert"' in page and 'id="create-alert" disabled' not in page
     assert 'value="s_nansen@yahoo.co.in, anitha.nansen@gmail.com"' in page
-    assert '||!f.checkValidity()' not in page
     response=client.post('/alerts',data={
         '_csrf':csrf(client),'name':'Weekly research roles',
         'email':'s_nansen@yahoo.co.in, anitha.nansen@gmail.com',
