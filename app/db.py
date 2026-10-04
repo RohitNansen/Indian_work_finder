@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS search_results (
   questions_json TEXT NOT NULL DEFAULT '[]',
   retirement_signal TEXT NOT NULL DEFAULT 'unknown',
   retirement_evidence TEXT NOT NULL DEFAULT '',
+  seen_before INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(run_id,job_id), FOREIGN KEY(run_id) REFERENCES search_runs(id),
   FOREIGN KEY(job_id) REFERENCES jobs(id)
 );
@@ -169,6 +170,8 @@ def init_db(path: Path | None = None) -> None:
             db.execute("ALTER TABLE search_results ADD COLUMN retirement_signal TEXT NOT NULL DEFAULT 'unknown'")
         if "retirement_evidence" not in columns:
             db.execute("ALTER TABLE search_results ADD COLUMN retirement_evidence TEXT NOT NULL DEFAULT ''")
+        if "seen_before" not in columns:
+            db.execute("ALTER TABLE search_results ADD COLUMN seen_before INTEGER NOT NULL DEFAULT 0")
         email_columns = {row["name"] for row in db.execute("PRAGMA table_info(email_runs)")}
         if "recipient_count" not in email_columns:
             db.execute("ALTER TABLE email_runs ADD COLUMN recipient_count INTEGER NOT NULL DEFAULT 1")

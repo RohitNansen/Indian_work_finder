@@ -25,6 +25,7 @@ load_dotenv()
 class Settings:
     data_dir: Path = Path(os.getenv("DATA_DIR", "./data")).resolve()
     app_password: str = os.getenv("APP_PASSWORD", "")
+    owner_password: str = os.getenv("OWNER_PASSWORD", "")
     app_secret: str = os.getenv("APP_SECRET", "")
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
     app_base_path: str = os.getenv("APP_BASE_PATH", urlparse(os.getenv("APP_BASE_URL", "http://localhost:8000")).path).rstrip("/")

@@ -19,7 +19,8 @@ def check_password(password, encoded):
 def session_value(role='admin'):
     # Password changes invalidate candidate sessions.
     account = one('SELECT password_hash FROM candidate_account WHERE id=1')
-    version = hashlib.sha256((account['password_hash'] if account else '').encode()).hexdigest()[:12] if role == 'candidate' else 'owner'
+    version = (hashlib.sha256((account['password_hash'] if account else '').encode()).hexdigest()[:12]
+               if role == 'candidate' else hashlib.sha256(settings.owner_password.encode()).hexdigest()[:12])
     payload = f'{int(time.time()) + 7 * 86400}.{role}.{version}'
     return payload + '.' + hmac.new(settings.app_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
@@ -42,6 +43,8 @@ def session_role(request):
             account = one('SELECT password_hash FROM candidate_account WHERE id=1')
             if not account or parts[2] != hashlib.sha256(account['password_hash'].encode()).hexdigest()[:12]:
                 return None
+        elif not settings.owner_password or parts[2] != hashlib.sha256(settings.owner_password.encode()).hexdigest()[:12]:
+            return None
         return parts[1]
     except (ValueError, TypeError):
         return None

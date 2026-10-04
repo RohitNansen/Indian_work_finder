@@ -245,8 +245,11 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     def progress(stage, current=''):
         state.update(stage=stage,current=current)
         write('UPDATE search_runs SET progress_json=?,found_count=?,shortlisted_count=? WHERE id=?',(json.dumps(state),state['found'],state['matched'],run_id))
+    previous_ids={row['job_id'] for row in all_rows('SELECT DISTINCT job_id FROM search_results WHERE run_id<?',(run_id,))}
     started=time.monotonic();seen={};processed=set();selected=[];calls=0;web_calls=0;quota_limited=False;failures=0
     context=profile_context();resume_evidence=current_evidence()
+    def new_matches():
+        return sum(item['job']['id'] not in previous_ids for item in selected)
     def web_lookup(job):
         nonlocal web_calls
         if web_calls>=settings.employer_web_lookups_per_run:return []
@@ -274,7 +277,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if state['checked']>=settings.openrouter_max_jobs_per_run or time.monotonic()-started>540:break
             processed.add(job['id']);state['checked']+=1
             progress('Checking company vacancies',job['title']+' · '+job['company'])
-            resolved=resolve_job(job,run_id=run_id,web_discover=web_lookup)
+            resolved=resolve_job(job,force=job['id'] in previous_ids,run_id=run_id,web_discover=web_lookup)
             if resolved.get('direct_status')!='verified':continue
             evidence=json.loads(resolved.get('verified_json') or '{}')
             if not location_matches(resolved['location'],location_list,evidence.get('remote',False)):continue
@@ -296,7 +299,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if not evaluation and base<35:continue
             score=float(evaluation.get('relevance',base))
             selected.append({'job':job,'score':score,'evaluation':evaluation})
-        selected.sort(key=lambda x:(x['score'],x['job'].get('posted_at') or ''),reverse=True)
+        selected.sort(key=lambda x:(x['job']['id'] not in previous_ids,x['score'],x['job'].get('posted_at') or ''),reverse=True)
         state['matched']=min(count,len(selected));progress('Continuing search')
     try:
         queue=query_queue(roles_list,location_list,keywords_list)
@@ -307,9 +310,9 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if not group or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
             web_calls+=1;state['queries']+=1;progress('Searching company career pages',', '.join(group))
             ingest(discover_employer_vacancies(group,location_list,days_recent,run_id,keywords_list))
-            if len(selected)>=count:break
+            if new_matches()>=count:break
         assess(12)
-        while queue and calls<settings.jsearch_max_requests_per_run and len(selected)<count:
+        while queue and calls<settings.jsearch_max_requests_per_run and new_matches()<count:
             if time.monotonic()-started>540:state['stop_reason']='Search time limit reached';break
             if state['checked']>=settings.openrouter_max_jobs_per_run:state['stop_reason']='Vacancy checking budget reached';break
             query,remote,cursor=queue.popleft();calls+=1;state['queries']+=1;progress('Searching related roles',query)
@@ -321,15 +324,24 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if calls%3==0:assess(8)
             if next_cursor and added and calls>=len(roles_list):queue.append((query,remote,next_cursor))
             if no_new>=4 and calls>=len(roles_list):state['stop_reason']='Several searches found no new suitable vacancies';break
+        # If today's sources omit a previously shown vacancy, check the employer
+        # page again before offering it as a still-open result.
+        if not selected and previous_ids and state['checked']<settings.openrouter_max_jobs_per_run:
+            prior=all_rows("SELECT j.* FROM search_results r JOIN jobs j ON j.id=r.job_id WHERE r.run_id<? AND j.direct_status='verified' AND j.verification_version=3 GROUP BY j.id ORDER BY MAX(r.run_id) DESC LIMIT 20",(run_id,))
+            for row in prior:
+                job=dict(row)
+                if job['id'] not in seen and location_matches(job['location'],location_list,json.loads(job.get('verified_json') or '{}').get('remote',False)) and recent(job.get('posted_at'),days_recent):
+                    seen[job['id']]=job
+            state['found']=len(seen)
         if quota_limited and not seen:raise RuntimeError(state['stop_reason']+' before any listings could be retrieved')
         if len(selected)<count:assess(settings.openrouter_max_jobs_per_run-state['checked'])
         if not state['stop_reason']:
-            state['stop_reason']='Requested number found' if len(selected)>=count else 'Search budget completed' if queue else 'Available searches completed'
+            state['stop_reason']='Requested number of new jobs found' if new_matches()>=count else 'Search budget completed' if queue else 'Available searches completed'
         with connect() as db:
             for rank,item in enumerate(selected[:count],1):
                 job=item['job'];e=item['evaluation'];signal=e.get('retirement_signal','unknown');quote=e.get('retirement_evidence','')
                 if not quote or quote.lower() not in job['description'].lower():signal='unknown';quote=''
-                db.execute('INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,retirement_signal,retirement_evidence) VALUES(?,?,?,?,?,?,?,?)',(run_id,job['id'],rank,item['score'],e.get('why','Relevant experience and responsibilities'),json.dumps(e.get('unconfirmed',[])[:9]),signal,quote))
+                db.execute('INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,retirement_signal,retirement_evidence,seen_before) VALUES(?,?,?,?,?,?,?,?,?)',(run_id,job['id'],rank,item['score'],e.get('why','Relevant experience and responsibilities'),json.dumps(e.get('unconfirmed',[])[:9]),signal,quote,int(job['id'] in previous_ids)))
                 db.executemany('INSERT INTO job_evidence_matches(run_id,job_id,evidence_id,relevance) VALUES(?,?,?,?)',[(run_id,job['id'],row['id'],strength) for strength,row in evidence_matches(job,resume_evidence)])
             status='partial_quota' if quota_limited else 'complete'
             if failures and not seen:status='failed'

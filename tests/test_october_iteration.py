@@ -74,7 +74,7 @@ def test_pdf_too_long_preflight_retains_source(test_env):
 def test_progress_endpoint_has_counts(client):
     run=db.write('INSERT INTO search_runs(kind,started_at,parameters_json,progress_json) VALUES(?,?,?,?)',('manual',db.utcnow(),'{}',json.dumps({'queries':4,'found':12,'checked':5,'matched':2,'stage':'Checking company vacancies'})))
     html=client.get(f'/runs/{run}').text
-    assert 'role="progressbar"' in html and 'Listings found' in html and 'Matched' in html
+    assert 'role="progressbar"' in html and 'Possible listings' in html and 'Suitable jobs' in html
 
 
 def test_downloads_survive_unfittable_selected_edit(client,test_env):

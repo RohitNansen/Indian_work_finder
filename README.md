@@ -30,7 +30,9 @@ python3 -m venv .venv
 cp .env.example .env
 ```
 
-Edit `.env` with a long `APP_PASSWORD` and random `APP_SECRET`. Put provider keys there only after rotating any keys shared in chat. `.env` and `data/` are ignored by Git.
+Edit `.env` with an `APP_PASSWORD` for the candidate, a different private `OWNER_PASSWORD` for the owner, and a random `APP_SECRET`. The owner password opens **API use** and **Activity**; the candidate password cannot open them. Put provider keys there only after rotating any keys shared in chat. `.env` and `data/` are ignored by Git.
+
+The search count is a maximum, not a guaranteed number. Each run makes fresh source requests, checks promising results against the employer's live vacancy, and favours suitable jobs not shown before. Previously shown vacancies may appear again as **Still open** only after another employer-page check. Search requests, possible listings, listings checked, and suitable jobs are separate progress counts. A run can stop at its source-request cap, company-check cap, time budget, monthly spending guard, or when enough new jobs pass. The owner **API use** page shows recorded costs in USD; JSearch request costs are estimates and provider invoices remain authoritative.
 
 For free email sending from a personal Gmail address, set `EMAIL_FROM` to that address and `GMAIL_APP_PASSWORD` to a Google app password created with 2-Step Verification. Gmail takes priority if both Gmail and Resend are configured. Keep the app password out of Git and chat. The app records its own sent-recipient count; Gmail does not provide the app with a live remaining-quota API. Quota warning emails need a working sender to be delivered.
 

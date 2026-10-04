@@ -49,6 +49,8 @@ async def prefix_local_redirects(request: Request, call_next):
 def startup():
     if not settings.app_password or not settings.app_secret:
         raise RuntimeError("Set APP_PASSWORD and APP_SECRET in a private .env file")
+    if settings.owner_password and hmac.compare_digest(settings.owner_password, settings.app_password):
+        raise RuntimeError("OWNER_PASSWORD must differ from APP_PASSWORD")
     init_db()
     account=one("SELECT password_hash FROM candidate_account WHERE id=1")
     if not account or not check_password(settings.app_password,account["password_hash"]):
@@ -126,7 +128,9 @@ def login(request: Request, password: str = Form("")):
     ip = request.client.host if request.client else "unknown"
     role = None
     allowed = login_allowed(ip)
-    if allowed and hmac.compare_digest(password, settings.app_password):
+    if allowed and settings.owner_password and hmac.compare_digest(password, settings.owner_password):
+        role = "admin"
+    elif allowed and hmac.compare_digest(password, settings.app_password):
         role = "candidate"
     if not role:
         record_failure(ip)
@@ -259,14 +263,16 @@ def results(request: Request, run_id: int):
     if not run:
         raise HTTPException(404)
     jobs = all_rows(
-        "SELECT j.*,r.rank,r.why,COALESCE(NULLIF(s.status,'New'),CASE WHEN EXISTS(SELECT 1 FROM job_activity a WHERE a.job_id=j.id AND a.action IN ('listing_opened','application_link_opened')) THEN 'Opened' ELSE 'Unopened' END) AS application_status FROM search_results r "
+        "SELECT j.*,r.rank,r.why,r.seen_before,COALESCE(NULLIF(s.status,'New'),CASE WHEN EXISTS(SELECT 1 FROM job_activity a WHERE a.job_id=j.id AND a.action IN ('listing_opened','application_link_opened')) THEN 'Opened' ELSE 'Unopened' END) AS application_status FROM search_results r "
         "JOIN jobs j ON j.id=r.job_id LEFT JOIN job_status s ON s.job_id=j.id "
         "WHERE r.run_id=? AND j.direct_status='verified' AND j.verification_version=3 ORDER BY r.rank",
         (run_id,),
     )
     progress=json.loads(run["progress_json"])
     if run["status"]!="running":progress["matched"]=len(jobs)
-    return page(request, "results.html", run=run, jobs=jobs, progress=progress)
+    return page(request, "results.html", run=run, jobs=jobs, progress=progress,
+                new_count=sum(not job['seen_before'] for job in jobs),
+                requested_count=json.loads(run['parameters_json']).get('count',10))
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -474,6 +480,19 @@ def activity_page(request: Request):
                 quotas=all_rows("SELECT * FROM quota_checks ORDER BY id DESC LIMIT 50"),
                 quota_notifications=all_rows("SELECT * FROM quota_notifications "
                                              "ORDER BY id DESC LIMIT 50"))
+
+
+@app.get("/api-use", response_class=HTMLResponse)
+def api_use_page(request: Request):
+    if response := auth_or_redirect(request):
+        return response
+    require_admin(request)
+    month = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m")
+    return page(request, "api_use.html", month=month,
+                month_total=one("SELECT COALESCE(SUM(estimated_cost_usd),0) AS cost,COUNT(*) AS calls FROM api_calls WHERE substr(started_at,1,7)=?", (month,)),
+                by_provider=all_rows("SELECT provider,COUNT(*) AS calls,SUM(COALESCE(response_count,0)) AS returned,COALESCE(SUM(estimated_cost_usd),0) AS cost FROM api_calls WHERE substr(started_at,1,7)=? GROUP BY provider ORDER BY cost DESC", (month,)),
+                by_run=all_rows("SELECT r.id,r.started_at,r.kind,r.status,r.shortlisted_count,COUNT(c.id) AS calls,COALESCE(SUM(c.estimated_cost_usd),0) AS cost FROM search_runs r LEFT JOIN api_calls c ON c.run_id=r.id GROUP BY r.id ORDER BY r.id DESC LIMIT 30"),
+                monthly_limit=settings.monthly_spend_limit_usd)
 
 
 @app.post("/jobs/{job_id}/resume/propose")
