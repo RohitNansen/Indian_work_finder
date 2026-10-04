@@ -104,10 +104,10 @@ def to_raw(row: dict) -> dict | None:
 
 
 def discover_naukri_vacancies(roles: list[str], locations: list[str], days: int,
-                              run_id: int) -> list[dict]:
+                              run_id: int | None) -> list[dict]:
     if not settings.apify_token or month_spend() + START_PRICE_USD >= settings.monthly_spend_limit_usd:
         return []
-    keyword, location = query_choice(roles,locations,run_id)
+    keyword, location = query_choice(roles,locations,run_id or 1)
     payload = {'keyword':keyword,'location':location,'datePosted':str(min(days,30)),
                'maxResults':MAX_RESULTS,'fetchDetails':True,'descriptionFormat':'text',
                'postedBy':'Company'}
