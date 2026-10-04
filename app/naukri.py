@@ -70,6 +70,8 @@ def plausible_industrial_role(row: dict) -> bool:
         return False
     if not re.search(r'\b(?:quality|r&d|research|hardware|electrical|electronics|robotics|automation|product development|engineering head|engineering consultant)\b', title):
         return False
+    if not re.search(r'\b(?:head|director|manager|lead|senior|principal|chief|consultant|advisor|architect|vp|vice president)\b', title):
+        return False
     return bool(re.search(r'\b(?:manufactur\w*|supplier|hardware|electrical|electronics|embedded|robotic\w*|medical device|machiner\w*|industrial|power electronics|iso 13485|product development|r&d)\b', title+' '+detail))
 
 

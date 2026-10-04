@@ -20,5 +20,6 @@ def test_naukri_leads_are_industrial_and_portal_is_only_discovery():
     assert raw['job_apply_link']==row['portalUrl']
     assert raw['apply_options']==[]
     assert to_raw({**row,'title':'Software Test Automation Engineer'}) is None
+    assert to_raw({**row,'title':'Quality Engineer'}) is None
     assert to_raw({**row,'companyApplyUrl':'https://company.example/careers/123'})['apply_options']==[
         {'apply_link':'https://company.example/careers/123','is_direct':True}]
