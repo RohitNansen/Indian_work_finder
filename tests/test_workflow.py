@@ -24,7 +24,7 @@ def sample_job(title, company, suffix):
         "job_employment_type": "Full-time", "job_description":
         "Lead research and development, quality systems and product improvement.",
         "job_apply_link": f"https://example.com/apply/{suffix}",
-        "job_posted_at_datetime_utc": "2026-09-24T08:00:00Z",
+        "job_posted_at_datetime_utc": db.utcnow(),
     }
 
 
@@ -288,10 +288,10 @@ def test_role_search_includes_selected_keywords_and_rotates_places():
     queue = list(search.query_queue(["Electrical R&D Head", "Quality Head"],
                                     ["Chennai", "Bengaluru", "Remote India"],
                                     ["Electrical design", "Quality management"]))
-    assert any("Electrical design" in item[0] for item in queue)
-    assert any("Quality management" in item[0] for item in queue)
-    assert {place for place in ("Chennai", "Bengaluru", "remote in India")
-            if any(place in query for query, _, _ in queue)} == {"Chennai", "Bengaluru", "remote in India"}
+    assert any("electrical design" in item[0].lower() for item in queue)
+    assert any("quality management" in item[0].lower() for item in queue)
+    assert {place for place in ("Chennai", "Bengaluru", "India remote")
+            if any(place in query for query, _, _ in queue)} == {"Chennai", "Bengaluru", "India remote"}
 
 
 def test_exhausted_job_quota_does_not_report_zero_suitable_jobs(test_env, monkeypatch):

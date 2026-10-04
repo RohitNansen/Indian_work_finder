@@ -22,7 +22,7 @@ from .alerts import email_ready, parse_recipients
 from .config import settings
 from .db import all_rows, connect, init_db, one, utcnow, write
 from .evidence import store_evidence
-from .resume import export_variant, extract_text
+from .resume import export_variant, extract_text, preflight_changes, prepare_layout_edits
 from .search import DEFAULT_ROLES, labels, run_search
 
 DEFAULT_KEYWORDS = ["Research and development", "Quality management", "Product development",
@@ -50,6 +50,9 @@ def startup():
     if not settings.app_password or not settings.app_secret:
         raise RuntimeError("Set APP_PASSWORD and APP_SECRET in a private .env file")
     init_db()
+    account=one("SELECT password_hash FROM candidate_account WHERE id=1")
+    if not account or not check_password(settings.app_password,account["password_hash"]):
+        write("INSERT INTO candidate_account(id,password_hash,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash,updated_at=excluded.updated_at",(password_hash(settings.app_password),utcnow()))
     write("UPDATE search_runs SET status='failed',completed_at=?,error='The app restarted during this search. Please try again.' WHERE kind='manual' AND status='running'", (utcnow(),))
 
 
@@ -119,20 +122,16 @@ def login_page(request: Request):
 
 
 @app.post("/login")
-def login(request: Request, password: str = Form(""), username: str = Form("")):
+def login(request: Request, password: str = Form("")):
     ip = request.client.host if request.client else "unknown"
     role = None
     allowed = login_allowed(ip)
-    if allowed and username.strip().casefold() in {"", "admin"} and hmac.compare_digest(password, settings.app_password):
-        role = "admin"
-    account = one("SELECT password_hash FROM candidate_account WHERE id=1")
-    profile = one("SELECT name FROM profile WHERE id=1")
-    if allowed and not role and account and username.strip().casefold() == profile["name"].strip().casefold() and check_password(password, account["password_hash"]):
+    if allowed and hmac.compare_digest(password, settings.app_password):
         role = "candidate"
     if not role:
         record_failure(ip)
         return templates.TemplateResponse(request, "login.html", {
-            "error": "Please wait 15 minutes before trying again." if not allowed else "Check your name and password.",
+            "error": "Please wait 15 minutes before trying again." if not allowed else "Check your password.",
             "base_path": settings.app_base_path}, status_code=429 if not allowed else 401)
     response = RedirectResponse("/", status_code=303)
     response.set_cookie("work_session", session_value(role), httponly=True,
@@ -171,7 +170,7 @@ def profile_page(request: Request):
                 resume=one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1"),
                 evidence=all_rows("SELECT section,employer,role,statement FROM resume_evidence "
                                   "WHERE resume_id=(SELECT MAX(id) FROM resumes) ORDER BY id"),
-                facts=all_rows("SELECT * FROM facts WHERE active=1 ORDER BY id DESC"),
+                facts=all_rows("SELECT f.*,j.title AS job_title,j.company FROM facts f LEFT JOIN jobs j ON j.id=f.source_job_id WHERE f.active=1 ORDER BY f.id DESC"),
                 candidate_ready=bool(one("SELECT 1 FROM candidate_account WHERE id=1")))
 
 
@@ -226,9 +225,9 @@ async def search(request: Request, background: BackgroundTasks):
     if not settings.jsearch_api_key:
         raise HTTPException(503, "Job search is not configured yet. Please contact the owner.")
     try:
-        count=max(1,min(100,int(form.get("count",20))))
-        days=int(form.get("days_recent",7))
-        if days not in {1,3,7,30}:raise ValueError()
+        count=max(1,min(100,int(form.get("count",10))))
+        days=int(form.get("days_recent",30))
+        if days not in {1,3,7,30,60,90}:raise ValueError()
     except ValueError:
         raise HTTPException(400,"Choose a listed job count and date range")
     args=dict(kind="manual",roles=str(form.get("roles",""))[:2000],
@@ -262,10 +261,12 @@ def results(request: Request, run_id: int):
     jobs = all_rows(
         "SELECT j.*,r.rank,r.why,COALESCE(NULLIF(s.status,'New'),CASE WHEN EXISTS(SELECT 1 FROM job_activity a WHERE a.job_id=j.id AND a.action IN ('listing_opened','application_link_opened')) THEN 'Opened' ELSE 'Unopened' END) AS application_status FROM search_results r "
         "JOIN jobs j ON j.id=r.job_id LEFT JOIN job_status s ON s.job_id=j.id "
-        "WHERE r.run_id=? ORDER BY r.rank",
+        "WHERE r.run_id=? AND j.direct_status='verified' AND j.verification_version=3 ORDER BY r.rank",
         (run_id,),
     )
-    return page(request, "results.html", run=run, jobs=jobs)
+    progress=json.loads(run["progress_json"])
+    if run["status"]!="running":progress["matched"]=len(jobs)
+    return page(request, "results.html", run=run, jobs=jobs, progress=progress)
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -279,9 +280,10 @@ def job_page(request: Request, job_id: str):
               "WHERE job_id=? ORDER BY run_id DESC LIMIT 1",
               (job_id,))
     from .questions import ensure_questions
-    ensure_questions(dict(job))
+    if job["direct_status"]=="verified" and job["verification_version"]==3:
+        ensure_questions(dict(job))
     write("INSERT INTO job_activity(job_id,action,occurred_at) VALUES(?,?,?)", (job_id,"listing_opened",utcnow()))
-    questions = all_rows("SELECT * FROM questions WHERE job_id=? AND answered_at IS NULL ORDER BY id LIMIT 3", (job_id,))
+    questions = all_rows("SELECT * FROM questions WHERE job_id=? AND answered_at IS NULL ORDER BY id LIMIT 3", (job_id,)) if job["direct_status"]=="verified" and job["verification_version"]==3 else []
     answered = all_rows("SELECT * FROM questions WHERE job_id=? AND answered_at IS NOT NULL ORDER BY answered_at DESC", (job_id,))
     status = one("SELECT status FROM job_status WHERE job_id=?", (job_id,))
     variants = all_rows("SELECT * FROM resume_variants WHERE job_id=? ORDER BY id DESC", (job_id,))
@@ -400,7 +402,7 @@ async def add_alert(request: Request):
         raise HTTPException(400, "Check email, time and number of jobs")
     write(
         "INSERT INTO alerts(name,email,role_labels,keywords,locations,work_types,time_ist,count,"
-        "days_recent,created_at,last_sent_date_ist) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "days_recent,created_at,last_sent_date_ist,enabled) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)",
         (str(form.get("name", "Daily jobs"))[:120], email,
          str(form.get("roles", ""))[:2000], str(form.get("keywords", ""))[:2000],
          str(form.get("locations", ""))[:1000], str(form.get("work_types", ""))[:500],
@@ -481,6 +483,8 @@ async def propose_variant(request: Request, job_id: str):
     resume = one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1")
     if not job or not resume:
         raise HTTPException(404, "Upload a resume first")
+    if job["direct_status"]!="verified" or job["verification_version"]!=3:
+        raise HTTPException(400,"Please verify the company vacancy before preparing a tailored resume.")
     answers = [dict(x) for x in all_rows("SELECT fact FROM facts WHERE active=1")]
     if not settings.openrouter_api_key:
         raise HTTPException(503, "OpenRouter is not configured yet")
@@ -488,6 +492,7 @@ async def propose_variant(request: Request, job_id: str):
         changes = await run_in_threadpool(propose_resume_edits, resume["resume_text"], dict(job), answers)
     except Exception as exc:
         raise HTTPException(503, "The resume suggestions could not be prepared. Please try again later; your uploaded file is safe.") from exc
+    changes = await run_in_threadpool(prepare_layout_edits,Path(resume["stored_path"]),changes)
     variant_id = write(
         "INSERT INTO resume_variants(job_id,base_resume_id,proposed_json,created_at) VALUES(?,?,?,?)",
         (job_id, resume["id"], json.dumps(changes, ensure_ascii=False), utcnow()),
@@ -505,7 +510,8 @@ def variant_page(request: Request, variant_id: int):
     job = one("SELECT * FROM jobs WHERE id=?", (variant["job_id"],))
     return page(request, "variant.html", variant=variant, job=job,
                 changes=list(enumerate(json.loads(variant["proposed_json"]))),
-                approved=json.loads(variant["approved_json"]) if variant["approved_json"] and variant["layout_version"]==2 else None)
+                layout_notes=json.loads(variant["export_notes_json"] or "[]"),
+                approved=json.loads(variant["approved_json"]) if variant["approved_json"] and variant["layout_version"]==3 else None)
 
 
 @app.post("/resume-variants/{variant_id}/approve")
@@ -523,6 +529,9 @@ async def approve_variant(request: Request, variant_id: int):
     job = one("SELECT * FROM jobs WHERE id=?", (variant["job_id"],))
     profile = one("SELECT name FROM profile WHERE id=1")
     name = profile["name"] or Path(resume["filename"]).stem
+    checked = await run_in_threadpool(preflight_changes,Path(resume["stored_path"]),selected)
+    notes=[{"original":x["original"],"note":x["layout_note"]} for x in checked if not x["fits"]]
+    selected=[x for x in checked if x["fits"]]
     try:
         docx_path, pdf_path = await run_in_threadpool(export_variant,
             Path(resume["stored_path"]), resume["resume_text"], selected,
@@ -531,8 +540,8 @@ async def approve_variant(request: Request, variant_id: int):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     write(
-        "UPDATE resume_variants SET approved_json=?,approved_at=?,docx_path=?,pdf_path=?,layout_version=2 WHERE id=?",
-        (json.dumps(selected, ensure_ascii=False), utcnow(), str(docx_path), str(pdf_path), variant_id),
+        "UPDATE resume_variants SET approved_json=?,approved_at=?,docx_path=?,pdf_path=?,layout_version=3,export_notes_json=? WHERE id=?",
+        (json.dumps(selected, ensure_ascii=False), utcnow(), str(docx_path), str(pdf_path), json.dumps(notes), variant_id),
     )
     return RedirectResponse(f"/resume-variants/{variant_id}", status_code=303)
 
@@ -546,7 +555,7 @@ def download_variant(request: Request, variant_id: int, format_name: str):
     variant = one("SELECT * FROM resume_variants WHERE id=?", (variant_id,))
     if not variant or not variant["approved_at"]:
         raise HTTPException(404)
-    if variant["layout_version"] != 2:
+    if variant["layout_version"] != 3:
         return RedirectResponse(f"/resume-variants/{variant_id}",status_code=303)
     path = Path(variant[f"{format_name}_path"])
     if not path.is_file():
@@ -554,19 +563,6 @@ def download_variant(request: Request, variant_id: int, format_name: str):
     return FileResponse(path, filename=path.name,
                         media_type=("application/pdf" if format_name == "pdf" else
                                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
-
-
-@app.post("/candidate-account")
-async def save_candidate_account(request: Request):
-    await check_post(request)
-    require_admin(request)
-    form = await request.form()
-    password = str(form.get("password", ""))
-    if not re.fullmatch(r"[A-Za-z0-9]{6}", password):
-        raise HTTPException(400, "Choose exactly six letters or numbers")
-    write("INSERT INTO candidate_account(id,password_hash,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash,updated_at=excluded.updated_at",
-          (password_hash(password),utcnow()))
-    return RedirectResponse("/profile?account_saved=1#account", status_code=303)
 
 
 @app.post("/facts/{fact_id}/edit")

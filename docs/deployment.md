@@ -30,8 +30,8 @@ Verify the private `/healthz` endpoint from the Nginx container, the public `/jo
 
 The daily SQLite backup stays on the same VM. It does not protect against VM or disk loss, and uploads need separate off-VM backup. Copy both privately to another location and test a restore before treating the app as fully backed up.
 
-## Candidate access and document rendering
+## Access and document rendering
 
-Run `.venv/bin/python -m deploy.create_candidate_login` once after the profile name is set. It creates a six-character password with a salted scrypt hash and saves initial credentials privately to `data/candidate-login.txt` (mode 0600). The owner can choose a replacement password under My profile; changing it invalidates existing candidate sessions. Owner sign-in uses `admin` and the existing `APP_PASSWORD`. Both roles use the same household profile; only the owner can access Activity and account setup.
+The app now uses a single candidate password from the private `APP_PASSWORD` setting. Its requested value is set on the VM, never in Git. The username field and in-app account card are gone. This session has no access to Activity; owner audit logs remain in the VM database. Rotate `APP_SECRET` when changing the login model to invalidate previous sessions. Login attempts remain rate limited.
 
-Install `libreoffice-writer-nogui` and `fonts-crosextra-caladea` on Debian for DOCX-to-PDF conversion. `LIBREOFFICE_BIN` can select another installed converter. PDF-source exports use PyMuPDF directly and retain the source layout. Give the 1 GB VM swap space before rendering documents alongside other services; this VM uses `/var/swap-job-finder`, 1 GB, with its own `/etc/fstab` entry. Do not remove existing service files, ports or mounts.
+The original editable DOCX was supplied on 4 October 2026. New tailored files based on that source keep its Word styles, table columns, spacing and headings; LibreOffice generates the matching PDF. Tested examples remained three pages in both formats. PDF-source exports retain original PDF design and derive an editable Word version, with an explicit notice if wording cannot fit. The VM uses `libreoffice-writer-nogui` and 1 GB of dedicated swap. New alerts start paused and all current alerts should remain disabled until the owner turns them on.

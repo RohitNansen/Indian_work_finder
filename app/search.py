@@ -13,6 +13,7 @@ from .ai import rank_jobs
 from .config import settings
 from .db import all_rows, connect, one, utcnow, write
 from .evidence import current_evidence, evidence_matches
+from .matching import normalize, words, role_variants, location_matches, recent
 
 DEFAULT_ROLES = [
     "R&D Director", "Research and Development Consultant", "Head of Quality",
@@ -104,20 +105,20 @@ def date_filter(days_recent: int) -> str:
 
 
 def query_queue(roles: list[str], locations: list[str], keywords: list[str] | None = None):
-    queue = deque()
-    keywords = keywords or []
-    # Rotate locations so the early request budget covers every role and place.
-    for offset in range(len(locations)):
-        for index, role in enumerate(roles):
-            location = locations[(index + offset) % len(locations)]
-            remote = "remote" in location.lower()
-            query = f"{role} {'remote in India' if remote else 'jobs in ' + location}"
-            queue.append((query, remote, None))
-            if keywords:
-                role_words = set(re.findall(r"[a-z]{4,}", role.lower()))
-                matching = [k for k in keywords if role_words & set(re.findall(r"[a-z]{4,}", k.lower()))]
-                term = (matching or keywords)[(index + offset) % len(matching or keywords)]
-                queue.append((f"{role} {term} {'remote in India' if remote else 'jobs in ' + location}", remote, None))
+    queue=deque();seen=set()
+    # Cover every role before repeating a role with extra skill constraints.
+    for round_no in range(max(3,len(locations))):
+        for index,role in enumerate(roles):
+            variants=role_variants(role)
+            term=variants[round_no%len(variants)]
+            place=locations[(index+round_no)%len(locations)]
+            remote='remote' in place.lower()
+            query=f"{term} jobs in {'India remote' if remote else place}"
+            if query not in seen:queue.append((query,remote,None));seen.add(query)
+    # Skills expand the possible evidence; they do not all become mandatory query terms.
+    for index,skill in enumerate((keywords or [])[:6]):
+        query=f"{normalize(skill)} engineering lead jobs in {locations[index%len(locations)]}"
+        if query not in seen:queue.append((query,False,None));seen.add(query)
     return queue
 
 
@@ -165,7 +166,7 @@ def fetch_page(run_id: int, query: str, remote: bool, cursor: str | None,
 def save_job(raw: dict) -> dict:
     jid = job_key(raw)
     job = {
-        "id": jid, "source": "JSearch", "title": raw.get("job_title") or "",
+        "id": jid, "source": raw.get("source","JSearch"), "title": raw.get("job_title") or "",
         "company": raw.get("employer_name") or "",
         "location": raw.get("job_location") or "",
         "work_type": raw.get("job_employment_type") or "",
@@ -195,10 +196,10 @@ def save_job(raw: dict) -> dict:
 
 
 def deterministic_score(job: dict, roles: list[str], keywords: list[str], profile: str) -> float:
-    title = job["title"].lower()
-    description = job["description"].lower()
-    role_terms = [x.lower() for x in roles]
-    key_terms = [x.lower() for x in keywords]
+    title = normalize(job["title"])
+    description = normalize(job["description"])
+    role_terms = [normalize(x) for x in roles]
+    key_terms = [normalize(x) for x in keywords]
     score = 15.0
     score += 25 if any(x in title for x in role_terms) else 0
     score += sum(4 for x in key_terms if x in title)
@@ -227,147 +228,112 @@ def profile_context() -> str:
 
 
 def run_search(*, kind: str, roles: str, keywords: str, locations: str,
-               work_types: str, count: int, days_recent: int = 7,
+               work_types: str, count: int, days_recent: int = 30,
                alert_id: int | None = None, existing_run_id: int | None = None) -> int:
-    if not settings.jsearch_api_key:
-        raise RuntimeError("JSearch is not configured yet")
-    roles_list = labels(roles) or DEFAULT_ROLES
-    location_list = labels(locations) or ["Chennai", "Tamil Nadu", "Bengaluru", "Remote India"]
-    keywords_list = labels(keywords)
-    count = max(1, min(int(count), 100))
-    params = {"roles": roles_list, "keywords": keywords_list, "locations": location_list,
-              "work_types": labels(work_types), "count": count, "days_recent": days_recent}
-    run_id = existing_run_id or write(
-        "INSERT INTO search_runs(kind,alert_id,started_at,parameters_json) VALUES(?,?,?,?)",
-        (kind, alert_id, utcnow(), json.dumps(params, ensure_ascii=False)),
-    )
-    write("UPDATE search_runs SET parameters_json=? WHERE id=?", (json.dumps(params,ensure_ascii=False),run_id))
+    import time
+    from .direct_links import resolve_job, find_employer_on_web, discover_employer_vacancies
+    if not settings.jsearch_api_key:raise RuntimeError("JSearch is not configured yet")
+    roles_list=labels(roles) or DEFAULT_ROLES
+    location_list=labels(locations) or ['Chennai','Tamil Nadu','Bengaluru','Remote India']
+    keywords_list=labels(keywords);count=max(1,min(int(count),100))
+    params={'roles':roles_list,'keywords':keywords_list,'locations':location_list,'work_types':labels(work_types),'count':count,'days_recent':days_recent}
+    run_id=existing_run_id or write('INSERT INTO search_runs(kind,alert_id,started_at,parameters_json) VALUES(?,?,?,?)',(kind,alert_id,utcnow(),json.dumps(params)))
+    write('UPDATE search_runs SET parameters_json=? WHERE id=?',(json.dumps(params),run_id))
+    state={'stage':'Starting search','queries':0,'found':0,'checked':0,'matched':0,'current':'','stop_reason':''}
+    def progress(stage, current=''):
+        state.update(stage=stage,current=current)
+        write('UPDATE search_runs SET progress_json=?,found_count=?,shortlisted_count=? WHERE id=?',(json.dumps(state),state['found'],state['matched'],run_id))
+    started=time.monotonic();seen={};processed=set();selected=[];calls=0;web_calls=0;quota_limited=False;failures=0
+    context=profile_context();resume_evidence=current_evidence()
+    def web_lookup(job):
+        nonlocal web_calls
+        if web_calls>=settings.employer_web_lookups_per_run:return []
+        web_calls+=1;state['queries']+=1
+        return find_employer_on_web(job,run_id)
+    def ingest(rows):
+        added=0
+        for raw in rows:
+            if not acceptable_job(raw) or not work_type_matches(raw,params['work_types']):continue
+            # Exact freshness/location are checked again on the employer vacancy.
+            if not location_matches(raw.get('job_location',''),location_list,bool(raw.get('job_is_remote'))):continue
+            stamp=raw.get('job_posted_at_datetime_utc') or raw.get('job_posted_at')
+            if stamp and not recent(stamp,days_recent):continue
+            job=save_job(raw)
+            if job['id'] in seen:continue
+            seen[job['id']]=job;added+=1
+        state['found']=len(seen)
+        return added
+    def assess(limit=8):
+        available=[j for jid,j in seen.items() if jid not in processed]
+        available=[j for j in available if not any(term in normalize(j['title']) for term in ('junior','intern','trainee','entry level'))]
+        available.sort(key=lambda j:deterministic_score(j,roles_list,keywords_list,context),reverse=True)
+        verified=[]
+        for job in available[:limit]:
+            if state['checked']>=settings.openrouter_max_jobs_per_run or time.monotonic()-started>540:break
+            processed.add(job['id']);state['checked']+=1
+            progress('Checking company vacancies',job['title']+' · '+job['company'])
+            resolved=resolve_job(job,run_id=run_id,web_discover=web_lookup)
+            if resolved.get('direct_status')!='verified':continue
+            evidence=json.loads(resolved.get('verified_json') or '{}')
+            if not location_matches(resolved['location'],location_list,evidence.get('remote',False)):continue
+            if not recent(resolved.get('posted_at'),days_recent):continue
+            if any(x['job']['direct_url']==resolved['direct_url'] for x in selected):continue
+            verified.append(resolved)
+        if not verified:return
+        progress('Matching verified job descriptions')
+        ai={}
+        if settings.openrouter_api_key:
+            try:ai=rank_jobs(run_id,context,verified)
+            except Exception:pass
+        for job in verified:
+            evaluation=ai.get(job['id'],{})
+            base=deterministic_score(job,roles_list,keywords_list,context)
+            # An unavailable model is not permission to claim a strong profile match.
+            if settings.openrouter_api_key and not evaluation:continue
+            if evaluation and evaluation.get('relevance',0)<55:continue
+            if not evaluation and base<35:continue
+            score=float(evaluation.get('relevance',base))
+            selected.append({'job':job,'score':score,'evaluation':evaluation})
+        selected.sort(key=lambda x:(x['score'],x['job'].get('posted_at') or ''),reverse=True)
+        state['matched']=min(count,len(selected));progress('Continuing search')
     try:
-        queue = query_queue(roles_list, location_list, keywords_list)
-        seen: dict[str, dict] = {}
-        seen_signatures: set[str] = set()
-        calls = 0
-        successful_calls = 0
-        quota_limited = False
-        # Search enough alternatives to curate the requested number, within a clear API cap.
-        minimum_coverage = min(len(roles_list), settings.jsearch_max_requests_per_run)
-        while queue and calls < max(1, settings.jsearch_max_requests_per_run // 2) and (len(seen) < count * 4 or calls < minimum_coverage):
-            query, remote, cursor = queue.popleft()
-            try:
-                page, next_cursor = fetch_page(run_id, query, remote, cursor, days_recent)
-            except QuotaExceeded:
-                quota_limited = True
-                break
-            except Exception:
-                calls += 1
-                continue
-            calls += 1
-            successful_calls += 1
-            for raw in page:
-                if not acceptable_job(raw) or not work_type_matches(raw, labels(work_types)):
-                    continue
-                signature = "|".join([
-                    str(raw.get("job_title", "")).lower().strip(),
-                    str(raw.get("employer_name", "")).lower().strip(),
-                    str(raw.get("job_location", "")).lower().strip(),
-                ])
-                if signature in seen_signatures:
-                    continue
-                seen_signatures.add(signature)
-                job = save_job(raw)
-                seen[job["id"]] = job
-            if next_cursor and len(seen) < count * 4:
-                queue.append((query, remote, next_cursor))
-        if not successful_calls:
-            raise RuntimeError("JSearch quota reached" if quota_limited else "JSearch could not return jobs")
-        context = profile_context() + f"\nCurrent search work types: {work_types}\nLocations: {locations}"
-        resume_evidence = current_evidence()
-        matches_by_job = {j["id"]: evidence_matches(j, resume_evidence) for j in seen.values()}
-        scored = [(deterministic_score(j, roles_list, keywords_list, context)
-                   + min(20, sum(score for score, _ in matches_by_job[j["id"]]) * 0.35), j)
-                  for j in seen.values()]
-        scored.sort(key=lambda x: x[0], reverse=True)
-        candidates = [j for _, j in scored[:min(settings.openrouter_max_jobs_per_run,
-                                                  max(count * 2, 15))]]
-        ai = {}
-        if candidates and settings.openrouter_api_key:
-            try:
-                ai = rank_jobs(run_id, context, candidates)
-            except Exception:
-                # Search remains usable; the failure is present in the API log.
-                ai = {}
-        ordered = []
-        for base, job in scored:
-            evaluation = ai.get(job["id"], {})
-            signal = evaluation.get("retirement_signal", "unknown")
-            evidence = evaluation.get("retirement_evidence", "")
-            if not evidence or evidence.lower() not in job["description"].lower():
-                signal, evidence = "unknown", ""
-            if evaluation:
-                score = 0.8 * max(0, min(100, float(evaluation.get("relevance", 0)))) + 0.2 * min(100, base)
-            else:
-                score = min(100, base) * (0.5 if ai else 1.0)
-            if signal == "welcomes_retired":
-                score += 8
-            elif signal == "explicit_restriction":
-                score -= 20
-            why = evaluation.get("why") or "Relevant senior experience and search preferences"
-            questions = evaluation.get("unconfirmed") or []
-            # A requested result count is a ceiling, never a reason to fill with weak roles.
-            if evaluation and float(evaluation.get("relevance",0)) < 55:
-                continue
-            if not evaluation and base < 30:
-                continue
-            ordered.append((score, job, why, questions, signal, evidence))
-        ordered.sort(key=lambda x: x[0], reverse=True)
-        from .direct_links import resolve_job, find_employer_on_web
-        def discover(job):
-            nonlocal calls
-            if calls >= settings.jsearch_max_requests_per_run:
-                return []
-            calls += 1
-            try:
-                rows, _ = fetch_page(run_id, f'{job["title"]} {job["company"]} careers India', False, None, days_recent)
-                return rows
-            except Exception:
-                return []
-        web_calls=0
-        def web_discover(job):
-            nonlocal web_calls
-            if web_calls >= settings.employer_web_lookups_per_run:
-                return []
-            web_calls+=1
-            return find_employer_on_web(job,run_id)
-        verified = []
-        for item in ordered[:settings.openrouter_max_jobs_per_run]:
-            resolved = resolve_job(item[1], discover=discover, run_id=run_id, web_discover=web_discover)
-            if resolved.get("direct_status") == "verified":
-                verified.append(item)
-            if len(verified) >= count:
-                break
+        queue=query_queue(roles_list,location_list,keywords_list)
+        no_new=0
+        # A small direct-career search complements the aggregator with different sources.
+        groups=[roles_list[i:i+2] for i in range(0,len(roles_list),2)]
+        for group in groups:
+            if not group or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
+            web_calls+=1;state['queries']+=1;progress('Searching company career pages',', '.join(group))
+            ingest(discover_employer_vacancies(group,location_list,days_recent,run_id,keywords_list))
+            if len(selected)>=count:break
+        assess(12)
+        while queue and calls<settings.jsearch_max_requests_per_run and len(selected)<count:
+            if time.monotonic()-started>540:state['stop_reason']='Search time limit reached';break
+            if state['checked']>=settings.openrouter_max_jobs_per_run:state['stop_reason']='Vacancy checking budget reached';break
+            query,remote,cursor=queue.popleft();calls+=1;state['queries']+=1;progress('Searching related roles',query)
+            try:rows,next_cursor=fetch_page(run_id,query,remote,cursor,days_recent)
+            except QuotaExceeded:quota_limited=True;state['stop_reason']='Provider quota reached';break
+            except Exception:failures+=1;continue
+            added=ingest(rows);no_new=0 if added else no_new+1
+            progress('Reviewing newly found roles',query)
+            if calls%3==0:assess(8)
+            if next_cursor and added and calls>=len(roles_list):queue.append((query,remote,next_cursor))
+            if no_new>=4 and calls>=len(roles_list):state['stop_reason']='Several searches found no new suitable vacancies';break
+        if quota_limited and not seen:raise RuntimeError('JSearch quota reached before any listings could be retrieved')
+        if len(selected)<count:assess(settings.openrouter_max_jobs_per_run-state['checked'])
+        if not state['stop_reason']:
+            state['stop_reason']='Requested number found' if len(selected)>=count else 'Search budget completed' if queue else 'Available searches completed'
         with connect() as db:
-            for rank, (score, job, why, questions, signal, evidence) in enumerate(verified, 1):
-                db.execute(
-                    "INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,"
-                    "retirement_signal,retirement_evidence) VALUES(?,?,?,?,?,?,?,?)",
-                    (run_id, job["id"], rank, score, why,
-                     json.dumps(questions[:9], ensure_ascii=False), signal, evidence),
-                )
-                db.executemany(
-                    "INSERT INTO job_evidence_matches(run_id,job_id,evidence_id,relevance) "
-                    "VALUES(?,?,?,?)",
-                    [(run_id, job["id"], row["id"], strength)
-                     for strength, row in matches_by_job[job["id"]]],
-                )
-            db.execute(
-                "UPDATE search_runs SET completed_at=?,status=?,found_count=?,"
-                "shortlisted_count=?,error=? WHERE id=?",
-                (utcnow(), "partial_quota" if quota_limited else "complete", len(seen),
-                 len(verified), "JSearch quota reached during search" if quota_limited else None,
-                 run_id),
-            )
+            for rank,item in enumerate(selected[:count],1):
+                job=item['job'];e=item['evaluation'];signal=e.get('retirement_signal','unknown');quote=e.get('retirement_evidence','')
+                if not quote or quote.lower() not in job['description'].lower():signal='unknown';quote=''
+                db.execute('INSERT INTO search_results(run_id,job_id,rank,internal_score,why,questions_json,retirement_signal,retirement_evidence) VALUES(?,?,?,?,?,?,?,?)',(run_id,job['id'],rank,item['score'],e.get('why','Relevant experience and responsibilities'),json.dumps(e.get('unconfirmed',[])[:9]),signal,quote))
+                db.executemany('INSERT INTO job_evidence_matches(run_id,job_id,evidence_id,relevance) VALUES(?,?,?,?)',[(run_id,job['id'],row['id'],strength) for strength,row in evidence_matches(job,resume_evidence)])
+            status='partial_quota' if quota_limited else 'complete'
+            if failures and not seen:status='failed'
+            db.execute('UPDATE search_runs SET completed_at=?,status=?,found_count=?,shortlisted_count=?,error=? WHERE id=?',(utcnow(),status,len(seen),min(count,len(selected)),'Provider requests failed' if status=='failed' else None,run_id))
+        progress('Search finished')
         return run_id
     except Exception as exc:
-        write("UPDATE search_runs SET completed_at=?,status='failed',error=? WHERE id=?",
-              (utcnow(), str(exc)[:500], run_id))
-        raise
+        state['stop_reason']='Search interrupted';progress('Could not finish')
+        write("UPDATE search_runs SET completed_at=?,status='failed',error=? WHERE id=?",(utcnow(),str(exc)[:500],run_id));raise

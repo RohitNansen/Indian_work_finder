@@ -13,20 +13,14 @@ from conftest import csrf
 from test_workflow import sample_job
 
 
-def test_candidate_cannot_reach_owner_activity_or_reset_account(client):
+def test_password_only_candidate_cannot_reach_owner_activity(client):
     db.write("UPDATE profile SET name='Surendran Nansen R' WHERE id=1")
-    response=client.post('/candidate-account',data={'_csrf':csrf(client),'password':'Ab1234'})
-    assert response.status_code==200
-    with TestClient(app) as c:
-        assert c.post('/login',data={'username':'Surendran Nansen R','password':'Ab1234'}).status_code==200
-        home=c.get('/').text
-        assert 'Welcome, Surendran Nansen R' in home
-        assert '/activity' not in home
-        assert c.get('/activity').status_code==403
-        assert c.post('/candidate-account',data={'_csrf':csrf(c),'password':'123456'}).status_code==403
-        assert 'Surendran’s sign-in' not in c.get('/profile').text
-        client.post('/candidate-account',data={'_csrf':csrf(client),'password':'XY1234'})
-        assert c.get('/activity',follow_redirects=False).status_code==303
+    assert 'name="username"' not in TestClient(app).get('/login').text
+    assert 'Welcome, Surendran Nansen R' in client.get('/').text
+    assert '/activity' not in client.get('/').text
+    assert client.get('/activity').status_code==403
+    assert client.post('/candidate-account',data={'_csrf':csrf(client),'password':'123456'}).status_code==404
+    assert 'Surendran’s sign-in' not in client.get('/profile').text
 
 
 def test_short_password_rate_limit(test_env):
@@ -43,6 +37,7 @@ def test_memory_edits_survive_resume_replacement_and_questions_roll(client,monke
     monkeypatch.setattr('app.questions.settings',type('Settings',(),{'openrouter_api_key':''})())
     object.__setattr__(settings,'openrouter_api_key','')
     job=save_job(sample_job('Research Director','Lab','memory'))
+    db.write("UPDATE jobs SET direct_status='verified',verification_version=3 WHERE id=?",(job['id'],))
     ids=[]
     for i in range(5):
         ids.append(db.write('INSERT INTO questions(job_id,question,requirement,created_at) VALUES(?,?,?,?)',
@@ -72,6 +67,7 @@ def test_logo_tracking_and_opened_state(client,monkeypatch):
     monkeypatch.setattr('app.questions.ensure_questions',lambda job:None)
     raw=sample_job('R&D Head','Company','tracked');raw['employer_logo']='https://example.com/logo.png'
     job=save_job(raw)
+    db.write("UPDATE jobs SET direct_status='verified',verification_version=3 WHERE id=?",(job['id'],))
     run=db.write('INSERT INTO search_runs(kind,started_at,parameters_json) VALUES(?,?,?)',('manual',db.utcnow(),'{}'))
     db.write('INSERT INTO search_results(run_id,job_id,rank,internal_score) VALUES(?,?,1,90)',(run,job['id']))
     assert 'Unopened' in client.get(f'/runs/{run}').text
@@ -86,7 +82,7 @@ def test_logo_tracking_and_opened_state(client,monkeypatch):
 def employer_html(title='Research Director',closed=False):
     posting={'@type':'JobPosting','title':title,'hiringOrganization':{'name':'Example Engineering'},
              'jobLocation':{'address':{'addressLocality':'Chennai','addressCountry':'IN'}},
-             'validThrough':'2099-01-01'}
+             'description':'Lead research and development teams, manage engineering quality and support new product delivery across our Chennai manufacturing facility.', 'validThrough':'2099-01-01'}
     return '<html><script type="application/ld+json">'+json.dumps(posting)+'</script><h1>'+title+'</h1><p>'+('This position is closed' if closed else 'Apply')+'</p></html>'
 
 
@@ -129,6 +125,20 @@ def test_docx_change_preserves_unchanged_run_styles():
     assert p.runs[0].bold and p.runs[0].font.size==Pt(14)
     assert p.runs[1].font.name=='Cambria' and str(p.runs[1].font.color.rgb)=='123456'
     assert p.text=='R&D leadership: Led electrical development teams.'
+
+
+def test_pdf_wrapped_wording_fits_original_word_paragraph(test_env):
+    from app.resume import extract_text, preflight_changes, apply_changes
+    document=Document();p=document.add_paragraph()
+    p.add_run('• Experienced in global product development, including IEC 60601, ISO 13485 and ISO 14971.')
+    source=test_env/'original.docx';document.save(source)
+    change={'original':'• Experienced in global product development, including IEC 60601, ISO\n13485 and ISO 14971.',
+            'replacement':'• Experienced in global product development, including ISO 26262, IEC\n60601 and ISO 13485.'}
+    assert preflight_changes(source,[change])[0]['fits']
+    text,_=extract_text(source.read_bytes(),source.name)
+    assert 'ISO 26262, IEC 60601' in apply_changes(text,[change])
+    assert _replace_in_docx(document,[change])
+    assert 'ISO 26262, IEC 60601' in document.paragraphs[0].text
 
 
 def test_pdf_unchanged_export_identical(test_env):

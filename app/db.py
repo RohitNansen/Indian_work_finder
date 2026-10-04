@@ -176,15 +176,23 @@ def init_db(path: Path | None = None) -> None:
         if "last_attempt_date_ist" not in alert_columns:
             db.execute("ALTER TABLE alerts ADD COLUMN last_attempt_date_ist TEXT")
         variant_columns = {row["name"] for row in db.execute("PRAGMA table_info(resume_variants)")}
+        if "export_notes_json" not in variant_columns:
+            db.execute("ALTER TABLE resume_variants ADD COLUMN export_notes_json TEXT NOT NULL DEFAULT '[]'")
         if "layout_version" not in variant_columns:
             db.execute("ALTER TABLE resume_variants ADD COLUMN layout_version INTEGER NOT NULL DEFAULT 0")
         job_columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
         for column, definition in {
+            "verified_json": "TEXT NOT NULL DEFAULT '{}'", "verification_version": "INTEGER NOT NULL DEFAULT 0",
             "direct_url": "TEXT", "direct_status": "TEXT NOT NULL DEFAULT 'pending'",
             "direct_checked_at": "TEXT", "direct_note": "TEXT", "logo_url": "TEXT", "questions_prepared_at": "TEXT"
         }.items():
             if column not in job_columns:
                 db.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
+        db.execute("UPDATE jobs SET direct_status='pending',direct_url=NULL,direct_checked_at=NULL WHERE verification_version<3 AND direct_status='verified'")
+        db.execute("UPDATE search_runs SET shortlisted_count=(SELECT COUNT(*) FROM search_results r JOIN jobs j ON j.id=r.job_id WHERE r.run_id=search_runs.id AND j.direct_status='verified' AND j.verification_version=3) WHERE status!='running'")
+        run_columns={row['name'] for row in db.execute('PRAGMA table_info(search_runs)')}
+        if 'progress_json' not in run_columns:
+            db.execute("ALTER TABLE search_runs ADD COLUMN progress_json TEXT NOT NULL DEFAULT '{}'")
         import json
         for row in db.execute("SELECT id,raw_json FROM jobs WHERE logo_url IS NULL"):
             try:

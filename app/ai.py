@@ -88,7 +88,7 @@ def ask_json(*, run_id: int | None, operation: str, instructions: str,
         parsed = json.loads(message)
         if web_search:
             parsed['_web_sources'] = [a['url_citation']['url'] for a in result['choices'][0]['message'].get('annotations',[]) if a.get('type')=='url_citation' and a.get('url_citation',{}).get('url')]
-            write("UPDATE api_calls SET request_json=? WHERE id=?",(json.dumps({"model":model,"query":content,"web_search":web_search,"returned_urls":parsed.get("urls",[]),"source_urls":parsed['_web_sources']}),call_id))
+            write("UPDATE api_calls SET request_json=? WHERE id=?",(json.dumps({"model":model,"query":content,"web_search":web_search,"returned_urls":parsed.get("urls",[])+[j.get("url") for j in parsed.get("jobs",[]) if j.get("url")],"source_urls":parsed['_web_sources']}),call_id))
         return parsed
     except Exception as exc:
         status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
@@ -152,6 +152,7 @@ def rank_jobs(run_id: int | None, profile: str, jobs: list[dict[str, Any]],
             instructions=(
                 "You are curating jobs for a senior professional with 30+ years of experience. "
                 "Evaluate transferable responsibilities and achievements, not mere keyword overlap. "
+                "Distinguish physical products, electrical/electronic hardware, machinery, quality systems and medical-device work from pure SaaS, sales, software product management or AI software implementation. A generic leadership title alone is not a fit. Assess essential technical domain requirements against demonstrated experience. "
                 "The resume and confirmed answers have priority over unverified claims. "
                 "Consider seniority, location, employment type and whether the role is plausibly "
                 "open to an experienced retiree. Do not assume age restrictions where unstated. "

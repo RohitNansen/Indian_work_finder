@@ -20,7 +20,7 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Duplicate API results, empty results, provider failure, location mismatch, a transferable senior role with a different title, and a junior role with overlapping keywords.
 
-**Status:** Implemented with recent-post filter, explicit inactive/expired-post exclusion, and evidence-linked first-pass ranking. One live search saved 10 jobs and shortlisted 5; live India coverage, ranking quality and employer-page verification remain to be reviewed. A recent index entry alone cannot prove that an employer still accepts applications.
+**Status:** Implemented with recent-post filter, explicit inactive/expired-post exclusion, and evidence-linked first-pass ranking. The October verifier checks employer title, company, vacancy location, full description, status and freshness before a job can be shortlisted. Two capped real-profile tests returned one suitable verified job each from 90 and 79 indexed candidates; achieving 10 is still unproven. See [API options](job-api-options-2026-10-04.md).
 
 ## PBI 3 — Job questions and growing experience memory
 
@@ -30,15 +30,15 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Confirm experience and find it in the profile; change Yes to No and ensure the fact disappears; skip all questions; verify no unsupported fact enters the resume proposal.
 
-**Status:** Implemented; question quality to be tested with actual resume and jobs.
+**Status:** Implemented; questions are generated only from verified employer descriptions; candidate review remains important.
 
 ## PBI 4 — Click and application tracking
 
 **Description:** Record application-link opens separately from application status.
 
-**Acceptance criteria:** **Jobs I opened** shows job, company, last click time, click count and status. A click does not automatically mark Applied. Statuses: New, Saved, Applied, Interviewing, Rejected, Closed.
+**Acceptance criteria:** **Jobs Opened Status** shows job, company logo, last opened time in IST and status. A click does not automatically mark Applied. Statuses: New, Saved, Applied, Interviewing, Rejected, Closed.
 
-**Test scenarios:** Open twice, view click count, mark Applied, refresh and confirm state.
+**Test scenarios:** Open a vacancy, mark Applied, refresh and confirm state; verify clicks are recorded without implying an application.
 
 **Status:** Implemented and locally tested.
 
@@ -50,7 +50,7 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Approve one of two changes; reject all; use an answer confirmed for this job; refuse a proposal that cannot be located in the original; inspect exported files visually against the real resume.
 
-**Status:** Implemented; real-resume voice and layout review pending. PDF-source uploads create a new editable Word layout, so visual similarity needs review.
+**Status:** Implemented; the supplied original Word file now serves as the best source for future variants. The two former failure proposals were exported to Word and PDF, each at three pages, and visually checked against the original headings, colours, columns and spacing. PDF-source variants also preserve the original PDF page layout; incompatible edits retain original wording with an explicit notice.
 
 ## PBI 6 — Scheduled email alerts
 
@@ -60,7 +60,7 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Due alert in IST, changed delivery time, repeated scheduler invocation, zero/fewer new jobs, and email provider failure without repeating paid searches that day.
 
-**Status:** Implemented and connected to Gmail. A setup-test email was accepted. The daily alert is paused while the owner tests the app; no scheduled digest has been sent yet.
+**Status:** Implemented and connected to Gmail. A setup-test email was accepted. Two scheduled digests were logged on 3 and 4 October despite the standing pause request; all alerts were turned off on 4 October. New alerts now start paused until explicitly turned on.
 
 ## PBI 7 — Admin activity and cost control
 
@@ -70,7 +70,7 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Search failure retains an error record; cost totals update; returned URL is visible in Activity; `.env`, uploads and database remain ignored by Git.
 
-**Status:** Implemented; end-to-end live provider audit pending.
+**Status:** Implemented; two isolated live search audits were completed; their paid call usage is recorded with the release.
 
 ## PBI 7a — Quota alerts for the owner
 
@@ -90,7 +90,7 @@ The first release serves one experienced professional. It prioritizes usable job
 
 **Test scenarios:** Clean install from Git, restart VM, edit alert then confirm send, restore backup, compare model top-five lists and resume edits, test mobile-width UI.
 
-**Status:** App deployed on the existing VM under `/job-finder/`; HTTPS, login, profile, timers, one live search, email authentication, and backup service verified. The owner still needs to review live ranking and real-resume output, verify a scheduled digest after resuming alerts, and arrange recurring off-VM backup.
+**Status:** App deployed on the existing VM under `/job-finder/`; HTTPS, login, profile, timers, live search, email authentication, and backup service verified. The owner should review the two new shortlist examples and later resume alerts when ready. Recurring off-VM backup remains outstanding.
 
 ## Candidate usability update
 
