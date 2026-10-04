@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import io
+import html
 import re
 import shutil
 import subprocess
+from difflib import SequenceMatcher
+from datetime import datetime
 from pathlib import Path
+from zipfile import ZipFile
+from zoneinfo import ZoneInfo
 
 from docx import Document
 from pypdf import PdfReader
@@ -58,8 +63,28 @@ def apply_changes(text: str, changes: list[dict]) -> str:
             replacement = re.sub(r"\s+", " ", replacement).strip()
             if original not in text:
                 raise ValueError("An edit no longer matches the uploaded resume")
-        text = text.replace(original, replacement, 1)
+        if change.get('last'):
+            index = text.rfind(original)
+            text = text[:index] + replacement + text[index + len(original):]
+        else:
+            text = text.replace(original, replacement, 1)
     return text
+
+
+def _trailing_date_change(text: str, issued_at: datetime | None = None) -> dict | None:
+    """Refresh only a dated sign-off near the end, never employment dates."""
+    matches=list(re.finditer(r'(?m)^[ \t]*(\d{1,2}-[A-Za-z]{3}-\d{4})[ \t]*$',text.rstrip()))
+    if not matches or len(text.rstrip())-matches[-1].end()>120:
+        return None
+    original=matches[-1].group(1)
+    try:
+        datetime.strptime(original,'%d-%b-%Y')
+    except ValueError:
+        return None
+    now=(issued_at or datetime.now(ZoneInfo('Asia/Kolkata'))).astimezone(ZoneInfo('Asia/Kolkata'))
+    months=('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec')
+    updated=f'{now.day:02d}-{months[now.month-1]}-{now.year}'
+    return {'original':original,'replacement':updated,'last':True} if original!=updated else None
 
 
 def _replace_in_docx(document: Document, changes: list[dict]) -> bool:
@@ -72,14 +97,14 @@ def _replace_in_docx(document: Document, changes: list[dict]) -> bool:
         original, replacement = change['original'], change['replacement']
         compact_original = re.sub(r'\s+', ' ', original).strip()
         compact_replacement = re.sub(r'\s+', ' ', replacement).strip()
-        for paragraph in paragraphs:
+        for paragraph in reversed(paragraphs) if change.get('last') else paragraphs:
             nodes = [n for n in paragraph.xpath('.//w:t') if next(n.iterancestors('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')) is paragraph]
             text = ''.join(n.text or '' for n in nodes)
             if original not in text and compact_original in text:
                 original, replacement = compact_original, compact_replacement
             if original not in text:
                 continue
-            start = text.index(original)
+            start = text.rfind(original) if change.get('last') else text.index(original)
             # Work backwards, preserving all unchanged run formatting.
             for op, i, j, a, b in reversed(SequenceMatcher(None, original, replacement).get_opcodes()):
                 if op == 'equal': continue
@@ -99,6 +124,64 @@ def _replace_in_docx(document: Document, changes: list[dict]) -> bool:
         else:
             return False
     return True
+
+
+def _export_word_in_original_package(source: Path, target: Path, changes: list[dict]) -> None:
+    """Change text in the original OOXML package, retaining every layout part."""
+    paragraph_re = re.compile(rb'<w:p(?=[ >])[^>]*>.*?</w:p>', re.DOTALL)
+    text_re = re.compile(rb'<w:t(?=[ >])[^>]*>(.*?)</w:t>', re.DOTALL)
+    with ZipFile(source) as package:
+        xml = package.read('word/document.xml')
+        for change in changes:
+            original = change['original']
+            replacement = change['replacement']
+            candidates = list(paragraph_re.finditer(xml))
+            if change.get('last'):
+                candidates.reverse()
+            for paragraph in candidates:
+                part = paragraph.group()
+                nodes = list(text_re.finditer(part))
+                values = [html.unescape(node.group(1).decode('utf-8')) for node in nodes]
+                content = ''.join(values)
+                old, new = original, replacement
+                compact = re.sub(r'\s+', ' ', old).strip()
+                if old not in content and compact in content:
+                    old, new = compact, re.sub(r'\s+', ' ', new).strip()
+                if old not in content:
+                    continue
+                start = content.rfind(old) if change.get('last') else content.index(old)
+                for op, i, j, a, b in reversed(SequenceMatcher(None, old, new).get_opcodes()):
+                    if op == 'equal':
+                        continue
+                    left, right = start + i, start + j
+                    offsets = []
+                    pos = 0
+                    for index, value in enumerate(values):
+                        offsets.append((index, pos, pos + len(value)))
+                        pos += len(value)
+                    touched = [(index, lo, hi) for index, lo, hi in offsets if hi > left and lo < right]
+                    if left == right:
+                        touched = [next(((index, lo, hi) for index, lo, hi in offsets
+                                         if lo <= left <= hi), offsets[-1])]
+                    if not touched:
+                        raise ValueError('The edit cannot be placed in the original Word layout.')
+                    for touch_index, (index, lo, hi) in enumerate(touched):
+                        value = values[index]
+                        values[index] = (value[:max(0, left - lo)] +
+                                         (new[a:b] if touch_index == 0 else '') +
+                                         value[max(0, right - lo):])
+                for node, value in reversed(list(zip(nodes, values))):
+                    encoded = escape(value).encode('utf-8')
+                    if encoded != node.group(1):
+                        part = part[:node.start(1)] + encoded + part[node.end(1):]
+                xml = xml[:paragraph.start()] + part + xml[paragraph.end():]
+                break
+            else:
+                raise ValueError('An edit crosses paragraphs. Please shorten it to preserve the original formatting.')
+        with ZipFile(target, 'w') as result:
+            for item in package.infolist():
+                result.writestr(item, xml if item.filename == 'word/document.xml'
+                                else package.read(item.filename))
 
 
 def _pdf_with_original_layout(source: Path, target: Path, changes: list[dict]):
@@ -126,11 +209,13 @@ def _pdf_with_original_layout(source: Path, target: Path, changes: list[dict]):
                         value=norm(span['text']);start=len(text)
                         text+=value+' ';positions.append((span,start,start+len(value)))
                     if old in text:
-                        start=text.index(old);end=start+len(old)
+                        start=text.rfind(old) if change.get('last') else text.index(old);end=start+len(old)
                         touched=[(s,a,b) for s,a,b in positions if b>start and a<end]
                         matches.append((page.number,touched,text,start,end))
-            if len(matches)!=1:raise ValueError('This edit crosses separate layout areas or repeats in the PDF.')
-            number,touched,text,start,end=matches[0];page=doc[number]
+            if not matches:raise ValueError('This edit crosses separate layout areas or is missing in the PDF.')
+            if len(matches)>1 and not change.get('last'):
+                raise ValueError('This edit crosses separate layout areas or repeats in the PDF.')
+            number,touched,text,start,end=matches[-1];page=doc[number]
             spans=[s for s,_,_ in touched]
             if len({(s['font'],round(s['size'],2),s['color']) for s in spans})!=1:
                 raise ValueError('This edit crosses different text styles.')
@@ -192,24 +277,24 @@ def _convert_word_pdf(source: Path, folder: Path) -> Path:
 
 
 def export_variant(resume_path: Path, original_text: str, changes: list[dict],
-                   name: str, company: str, variant_id: int) -> tuple[Path, Path]:
+                   name: str, company: str, variant_id: int,
+                   issued_at: datetime | None = None) -> tuple[Path, Path]:
     import tempfile
     from .pdf_word_layout import pdf_to_word
     base=safe_filename(f'{name} - {company}')
     folder=settings.data_dir/'exports'/str(variant_id)
     folder.mkdir(parents=True,exist_ok=True)
-    apply_changes(original_text,changes)
+    date_change=_trailing_date_change(original_text,issued_at)
+    all_changes=[*changes,*([date_change] if date_change else [])]
+    apply_changes(original_text,all_changes)
     # Publish both files only after both have been successfully prepared.
     with tempfile.TemporaryDirectory(prefix='build-',dir=folder) as staging:
         stage=Path(staging);docx=stage/f'{base}.docx';pdf=stage/f'{base}.pdf'
         if resume_path.suffix.lower()=='.docx':
-            document=Document(resume_path)
-            if not _replace_in_docx(document,changes):
-                raise ValueError('An edit crosses paragraphs. Please shorten it to preserve the original formatting.')
-            document.save(docx)
+            _export_word_in_original_package(resume_path,docx,all_changes)
             _convert_word_pdf(docx,stage)
         else:
-            _pdf_with_original_layout(resume_path,pdf,changes)
+            _pdf_with_original_layout(resume_path,pdf,all_changes)
             pdf_to_word(pdf,docx)
         final_docx=folder/docx.name;final_pdf=folder/pdf.name
         shutil.move(docx,final_docx);shutil.move(pdf,final_pdf)

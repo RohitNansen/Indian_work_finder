@@ -51,3 +51,16 @@ def test_tracker_status_priority_and_date_sort_keep_closed_at_bottom(client):
     assert by_added.index('Applied Lab') < by_added.index('Opened Lab') < by_added.index('Offer Lab') < by_added.index('Rejected Lab')
     by_opened=client.get('/my-jobs?sort=opened').text
     assert by_opened.index('Opened Lab') < by_opened.index('Applied Lab') < by_opened.index('Offer Lab') < by_opened.index('Rejected Lab')
+
+
+def test_tracker_collects_every_verified_unopened_job_across_searches(client):
+    previous = save_job(sample_job('Head of Quality', 'Earlier Devices', 'previous'))
+    newest = save_job(sample_job('R&D Director', 'Current Machinery', 'newest'))
+    for kind, job in [('manual', previous), ('alert', newest)]:
+        db.write("UPDATE jobs SET direct_status='verified',verification_version=3,direct_url=apply_url WHERE id=?", (job['id'],))
+        run = db.write("INSERT INTO search_runs(kind,started_at,parameters_json,status) VALUES(?,?,'{}','complete')", (kind, db.utcnow()))
+        db.write("INSERT INTO search_results(run_id,job_id,rank,internal_score,why) VALUES(?,?,?,?,?)",
+                 (run,job['id'],1,90,'Relevant senior role'))
+    page = client.get('/my-jobs?view=recommended').text
+    assert 'Earlier Devices' in page and 'Current Machinery' in page
+    assert 'Recommended to review <span>2</span>' in page

@@ -5,6 +5,7 @@ from io import BytesIO
 from zoneinfo import ZoneInfo
 
 from docx import Document
+from pypdf import PdfReader
 from fastapi.testclient import TestClient
 
 from app import db, search
@@ -88,6 +89,38 @@ def test_resume_export_requires_exact_existing_wording(test_env):
         assert False, "An unsupported edit should fail"
     except ValueError:
         pass
+
+
+def test_resume_signoff_date_uses_ist_and_keeps_employment_dates(test_env):
+    from datetime import datetime, timezone
+    from app.resume import _trailing_date_change
+
+    text = "Worked from 01-Jan-2020 to 31-Aug-2026.\n\nSURENDRAN NANSEN R\nChennai, \n31-Aug-2026"
+    change = _trailing_date_change(text, datetime(2026, 10, 4, 20, 0, tzinfo=timezone.utc))
+    assert change == {"original": "31-Aug-2026", "replacement": "05-Oct-2026", "last": True}
+    assert apply_changes(text, [change]).count("31-Aug-2026") == 1
+    assert apply_changes(text, [change]).endswith("05-Oct-2026")
+    assert _trailing_date_change("Worked until 31-Aug-2026. No dated sign-off follows." ,
+                                 datetime(2026, 10, 4, tzinfo=timezone.utc)) is None
+
+    from zipfile import ZipFile
+    source = test_env / 'dated-resume.docx'
+    document = Document()
+    document.add_paragraph('Worked until 31-Aug-2026.')
+    document.add_paragraph('SURENDRAN NANSEN R')
+    document.add_paragraph('Chennai,')
+    document.add_paragraph('31-Aug-2026')
+    document.save(source)
+    docx_path, pdf_path = export_variant(source, text, [], 'A Person', 'Example Company', 2,
+                                         datetime(2026, 10, 4, 20, 0, tzinfo=timezone.utc))
+    paragraphs = [paragraph.text for paragraph in Document(docx_path).paragraphs]
+    assert paragraphs[0] == 'Worked until 31-Aug-2026.'
+    assert paragraphs[-1] == '05-Oct-2026'
+    assert '05-Oct-2026' in PdfReader(pdf_path).pages[0].extract_text()
+    with ZipFile(source) as original, ZipFile(docx_path) as output:
+        assert original.namelist() == output.namelist()
+        assert all(original.read(part) == output.read(part) for part in original.namelist()
+                   if part != 'word/document.xml')
 
 
 def test_alert_due_at_ist_once_per_day(test_env, monkeypatch):
