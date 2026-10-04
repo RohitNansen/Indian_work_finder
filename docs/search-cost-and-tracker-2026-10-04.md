@@ -1,0 +1,13 @@
+# Job tracker and Naukri discovery — 4 October 2026
+
+The Job tracker defaults to opened jobs and their application status. Its second view, **Recommended to review**, gathers verified jobs selected by any previous manual search or email alert that were never opened. New searches continue to omit jobs already recommended, while that second view keeps strong earlier matches visible.
+
+Each manual or alert search first checks the free employer feeds and a rotating selection of previously verified company career sites. It then runs **one** capped Naukri discovery query, followed by JSearch as needed. The Naukri query rotates an industrial R&D, hardware, automation or manufacturing quality role and a preferred city. It requests at most 25 listings, posted by companies, and recent within the user's date range up to 30 days. The app records every company from that result in its local company memory. Only vacancies verified on the employer's own page can enter a recommendation. A Naukri listing by itself does not guarantee a displayed job.
+
+## Cost at five searches daily for 30 days
+
+The VM currently has five completed search runs, with recorded provider costs of **$0.135–$0.214 per run**, averaging about **$0.176**. This small sample includes both manual searches and alerts, and mostly reflects JSearch and OpenRouter model/web-search use. At the current Naukri cap, the actor's published price is **$0.001 per run + $0.00039 per result**, or at most **$0.01075 per search**. At 150 runs, this is at most **$1.61**. Projecting the sample's average other costs gives **roughly $28 total recorded usage** for 150 searches; its observed low/high range projects to approximately **$22–$34**, including capped Naukri. This is a usage scenario, not a bill: free provider credits, subscriptions, future query mix and actual model token counts can change what is charged. A search with fewer than 25 Naukri results costs less.
+
+The app's current **$8 monthly spending guard** would stop paid discovery well before 150 similar searches. Daily alerts are currently paused. Keep the guard until the desired cadence and budget are chosen and tested. For JSearch, Pay As You Go is listed at $0.005 per request; the app permits at most 20 per search, but observed runs used 11–20. More aggressive source diversity should be assessed by direct employer matches per dollar, not raw listing count.
+
+Sources: [Apify Naukri actor and its pricing](https://apify.com/blackfalcondata/naukri-jobs-feed), [JSearch pricing](https://www.openwebninja.com/api/jsearch), [OpenRouter web search pricing](https://openrouter.ai/docs/guides/features/plugins/web-search). VM usage figures are from `api_calls` grouped by `search_runs` at the time of this update.

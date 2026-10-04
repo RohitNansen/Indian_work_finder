@@ -23,7 +23,7 @@ from .config import settings
 from .db import all_rows, connect, init_db, one, utcnow, write
 from .evidence import store_evidence
 from .resume import export_variant, extract_text, preflight_changes, prepare_layout_edits
-from .search import DEFAULT_ROLES, labels, run_search
+from .search import DEFAULT_ROLES, labels, normalized_link, run_search
 
 DEFAULT_KEYWORDS = ["Research and development", "Quality management", "Product development",
                     "Robotics", "Electronics", "Electrical engineering", "Textiles",
@@ -375,13 +375,38 @@ async def remove_fact(request: Request, fact_id: int):
 def my_jobs(request: Request):
     if response := auth_or_redirect(request):
         return response
-    jobs = all_rows(
+    view = "recommended" if request.query_params.get("view") == "recommended" else "opened"
+    opened_jobs = all_rows(
         "SELECT j.*,s.status,MAX(a.occurred_at) AS last_opened,COUNT(a.id) AS clicks "
         "FROM job_activity a JOIN jobs j ON j.id=a.job_id "
         "LEFT JOIN job_status s ON s.job_id=j.id "
         "WHERE a.action IN ('listing_opened','application_link_opened') GROUP BY j.id ORDER BY last_opened DESC"
     )
-    return page(request, "my_jobs.html", jobs=jobs)
+    recommended_rows = all_rows(
+        "SELECT j.*,r.why,r.internal_score,sr.kind AS search_kind,"
+        "sr.started_at AS recommended_at FROM search_results r "
+        "JOIN jobs j ON j.id=r.job_id JOIN search_runs sr ON sr.id=r.run_id "
+        "WHERE j.direct_status='verified' AND j.verification_version=3 "
+        "AND r.run_id=(SELECT rr.run_id FROM search_results rr WHERE rr.job_id=j.id "
+        "ORDER BY rr.internal_score DESC,rr.run_id DESC LIMIT 1) "
+        "AND NOT EXISTS(SELECT 1 FROM job_activity a WHERE a.job_id=j.id "
+        "AND a.action IN ('listing_opened','application_link_opened')) "
+        "AND NOT EXISTS(SELECT 1 FROM job_status s WHERE s.job_id=j.id "
+        "AND s.status IN ('Applied','Interviewing','Offer','Rejected','Closed')) "
+        "ORDER BY r.internal_score DESC,sr.started_at DESC"
+    )
+    recommended=[]
+    seen_urls=set()
+    opened_urls={normalized_link(row['direct_url']) for row in opened_jobs if row['direct_url']}
+    for row in recommended_rows:
+        url=normalized_link(row['direct_url'])
+        if url and (url in seen_urls or url in opened_urls):
+            continue
+        if url:
+            seen_urls.add(url)
+        recommended.append(row)
+    return page(request, "my_jobs.html", jobs=opened_jobs if view=="opened" else recommended,
+                view=view, opened_count=len(opened_jobs), recommended_count=len(recommended))
 
 
 @app.get("/alerts", response_class=HTMLResponse)

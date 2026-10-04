@@ -74,7 +74,7 @@ def test_logo_tracking_and_opened_state(client,monkeypatch):
     client.get('/jobs/'+job['id'])
     assert 'Opened' in client.get(f'/runs/{run}').text
     page=client.get('/my-jobs').text
-    assert 'Jobs Opened Status' in page and 'logo.png' in page and 'Times opened' not in page
+    assert 'Job tracker' in page and 'logo.png' in page and 'Times opened' not in page
     assert 'UTC' not in page
     assert db.one('SELECT status FROM job_status WHERE job_id=?',(job['id'],)) is None
 

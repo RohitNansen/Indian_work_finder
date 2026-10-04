@@ -30,6 +30,7 @@ class Settings:
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
     app_base_path: str = os.getenv("APP_BASE_PATH", urlparse(os.getenv("APP_BASE_URL", "http://localhost:8000")).path).rstrip("/")
     jsearch_api_key: str = os.getenv("JSEARCH_API_KEY", "")
+    apify_token: str = os.getenv("APIFY_TOKEN", "")
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "google/gemini-3.8-flash")
     resend_api_key: str = os.getenv("RESEND_API_KEY", "")

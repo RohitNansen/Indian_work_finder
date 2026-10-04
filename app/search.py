@@ -249,6 +249,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                                discover_employer_vacancies, discover_watched_company_vacancies)
     from .ats_feeds import discover_ats_vacancies
     from .company_memory import watched_company_sites
+    from .naukri import discover_naukri_vacancies
     if not settings.jsearch_api_key:raise RuntimeError("JSearch is not configured yet")
     roles_list=labels(roles) or DEFAULT_ROLES
     location_list=labels(locations) or ['Chennai','Tamil Nadu','Bengaluru','Remote India']
@@ -341,6 +342,14 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             ingest(discover_employer_vacancies(group,location_list,days_recent,run_id,keywords_list))
             if new_matches()>=count:break
         assess(12)
+        # One small Naukri discovery query on every run. Its portal links are
+        # never presented to the candidate; each lead still needs an exact
+        # employer vacancy and the normal relevance checks below.
+        if settings.apify_token:
+            state['queries']+=1
+            progress('Searching Naukri for relevant roles')
+            ingest(discover_naukri_vacancies(roles_list,location_list,days_recent,run_id))
+            assess(8)
         while queue and calls<settings.jsearch_max_requests_per_run and new_matches()<count:
             if time.monotonic()-started>540:state['stop_reason']='Search time limit reached';break
             if state['checked']>=settings.openrouter_max_jobs_per_run:state['stop_reason']='Vacancy checking budget reached';break
