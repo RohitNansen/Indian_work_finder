@@ -29,7 +29,8 @@ def sample_job(title, company, suffix):
 
 
 def test_search_deduplicates_and_tracks_click_separately(client, monkeypatch):
-    from app import direct_links
+    from app import direct_links, ats_feeds
+    monkeypatch.setattr(ats_feeds, 'discover_ats_vacancies', lambda *args: [])
     monkeypatch.setattr(direct_links, "resolve_job", lambda job, **kw: dict(job, direct_status="verified", direct_url=job["apply_url"]))
     object.__setattr__(settings, "jsearch_api_key", "test-key")
     object.__setattr__(settings, "openrouter_api_key", "")
@@ -295,6 +296,8 @@ def test_role_search_includes_selected_keywords_and_rotates_places():
 
 
 def test_exhausted_job_quota_does_not_report_zero_suitable_jobs(test_env, monkeypatch):
+    from app import ats_feeds
+    monkeypatch.setattr(ats_feeds, 'discover_ats_vacancies', lambda *args: [])
     object.__setattr__(settings, "jsearch_api_key", "test-key")
     monkeypatch.setattr(search, "fetch_page", lambda *args: (_ for _ in ()).throw(search.QuotaExceeded("limit")))
     with pytest.raises(RuntimeError, match="before any listings could be retrieved"):

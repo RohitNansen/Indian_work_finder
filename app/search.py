@@ -234,6 +234,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                alert_id: int | None = None, existing_run_id: int | None = None) -> int:
     import time
     from .direct_links import resolve_job, find_employer_on_web, discover_employer_vacancies
+    from .ats_feeds import discover_ats_vacancies
     if not settings.jsearch_api_key:raise RuntimeError("JSearch is not configured yet")
     roles_list=labels(roles) or DEFAULT_ROLES
     location_list=labels(locations) or ['Chennai','Tamil Nadu','Bengaluru','Remote India']
@@ -304,10 +305,13 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     try:
         queue=query_queue(roles_list,location_list,keywords_list)
         no_new=0
+        progress('Checking employer job boards','Dozee and Instawork')
+        ingest(discover_ats_vacancies(run_id))
+        assess(8)
         # A small direct-career search complements the aggregator with different sources.
         groups=[roles_list[i:i+2] for i in range(0,len(roles_list),2)]
         for group in groups:
-            if not group or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
+            if not group or new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
             web_calls+=1;state['queries']+=1;progress('Searching company career pages',', '.join(group))
             ingest(discover_employer_vacancies(group,location_list,days_recent,run_id,keywords_list))
             if new_matches()>=count:break

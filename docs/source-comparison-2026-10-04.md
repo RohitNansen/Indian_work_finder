@@ -1,0 +1,16 @@
+# India job-source comparison — 4 October 2026
+
+This is a small, role-specific pilot for one experienced R&D, hardware and quality leader in Chennai/Bengaluru. It is not a market-wide estimate. The app shows a job only after it verifies the employer vacancy's title, location, description, date and company application page.
+
+| Source | What we checked | Finding for this profile |
+| --- | --- | --- |
+| JSearch | The latest live app run: 87 possible listings, 40 company checks, 2 suitable verified jobs | Useful broad discovery, but too few direct, relevant vacancies to promise 10 jobs on each run. Buying more of the same data does not resolve that. |
+| Lever public employer feeds | Dozee: 18 published jobs, 8 in India; Parallel Wireless: 47 published, 8 in India | Dozee's *Hardware Lead* in Bangalore was posted 2 October and passed our employer-page verification. Its medical IoT, electrical safety and hardware leadership duties make it a strong candidate for full profile matching. Parallel Wireless was mostly specialised telecom testing. |
+| Greenhouse public employer feeds | Instawork: 57 published, 35 in India; OneTrust: 90/21; Pure Storage: 360/85; Skild AI: 46/12 | Instawork's *Head of Quality Assurance — Robotics Labs* is substantially relevant, but was first published 28 August, outside a 30-day search. Its *Hardware Technician Lead* is recent but asks for 3–5 years and a night shift, so seniority is a poor fit. Other sampled boards were mainly software roles. Greenhouse supplies the original publication date and an official individual job endpoint. |
+| Apify Naukri actor | Pending private token and a capped 25-record run for each of four searches | Vendor lists $0.001 per start plus $0.00039 per record on the free plan. We will compare recent relevant titles, overlap with JSearch, availability of `companyApplyUrl`, and the number of links that pass live employer verification before client display. |
+
+The employer feeds are free and particularly strong for authenticity and direct applications, but each feed covers just one company. A curated set of promising employers is better suited to this client than attempting to ingest every technology board. Current live integration starts with Dozee and Instawork. The Greenhouse verifier now uses its official Job Board API for pages that omit JobPosting structured data, while retaining strict employer, title, location, deadline and description checks.
+
+Pilot Naukri searches (25 records maximum each): hardware engineering head/Bangalore, medical device R&D/Bangalore, head of quality/Chennai, automation consultant/Chennai. Four full runs would cost about $0.043 at the actor's listed price; billing in Apify Console is authoritative. The test starts with the free credit and requires no $10 top-up.
+
+Sources: [JSearch](https://www.openwebninja.com/api/jsearch), [Apify Naukri actor](https://apify.com/blackfalcondata/naukri-jobs-feed), [Lever Postings API](https://github.com/lever/postings-api), [Greenhouse Job Board API](https://docs.greenhouse.io/job-board.html), [Dozee vacancy](https://jobs.lever.co/dozee/ce1319b0-dbcb-4847-b3eb-da75d11755ab), [Instawork vacancy](https://job-boards.greenhouse.io/instawork/jobs/4709116006).

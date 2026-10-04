@@ -26,7 +26,8 @@ def test_owner_cost_view_is_private(test_env):
 
 
 def test_repeat_search_looks_for_new_and_marks_still_open(test_env, monkeypatch):
-    from app import direct_links
+    from app import direct_links, ats_feeds
+    monkeypatch.setattr(ats_feeds, 'discover_ats_vacancies', lambda *args: [])
     original_key = settings.jsearch_api_key
     original_model_key = settings.openrouter_api_key
     original_requests = settings.jsearch_max_requests_per_run

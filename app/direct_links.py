@@ -6,6 +6,7 @@ Unverifiable pages remain hidden from new shortlists.
 """
 from __future__ import annotations
 import ipaddress
+import html as html_module
 import json
 import re
 import socket
@@ -163,6 +164,62 @@ def verify_page(url,html,job):
     return valid,note
 
 
+def greenhouse_vacancy_details(url, page_html, job):
+    """Confirm a public Greenhouse posting through its official Job Board API.
+
+    Some Greenhouse job pages omit JobPosting JSON-LD. The public board API
+    supplies the individual vacancy's employer, title, location and publish
+    date, and a missing/closed posting no longer returns a public job.
+    """
+    from .matching import title_matches, location_matches
+    parsed = urlparse(url)
+    if host(url) not in {'job-boards.greenhouse.io', 'boards.greenhouse.io'}:
+        return False, 'Not a Greenhouse job page', {}
+    match = re.fullmatch(r'/([A-Za-z0-9_-]+)/jobs/(\d+)', parsed.path.rstrip('/'))
+    if not match:
+        return False, 'Not an individual Greenhouse vacancy', {}
+    board, posting_id = match.groups()
+    endpoint = f'https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{posting_id}'
+    try:
+        with httpx.Client(timeout=8, trust_env=False) as client:
+            response = client.get(endpoint, params={'content':'true'})
+            response.raise_for_status()
+            posting = response.json()
+    except (httpx.HTTPError, ValueError):
+        return False, 'Greenhouse no longer exposes this vacancy', {}
+    title = str(posting.get('title') or '')
+    company = str(posting.get('company_name') or '')
+    location = str((posting.get('location') or {}).get('name') or '')
+    visible = BeautifulSoup(page_html,'html.parser')
+    if any(phrase in visible.get_text(' ',strip=True).lower() for phrase in
+           ('job is no longer available','position has been filled',
+            'no longer accepting applications','this position is closed')):
+        return False, 'Greenhouse page says applications are closed', {}
+    headings = [h.get_text(' ',strip=True) for h in visible.find_all('h1') if h.get_text(strip=True)]
+    if not title_matches(job['title'],title,job.get('location','')) or (headings and not any(title_matches(title,h,job.get('location','')) for h in headings)):
+        return False, 'Greenhouse job title differs from the listing', {}
+    if not employer_host(url,job,company) or (company and not tokens(company)&tokens(job['company'])):
+        return False, 'Greenhouse employer differs from the listing', {}
+    if not location_matches(location,[job.get('location','').split(',')[0]],False):
+        return False, 'Greenhouse vacancy location differs from the listing', {}
+    deadline = posting.get('application_deadline')
+    if deadline:
+        try:
+            expiry = datetime.fromisoformat(str(deadline).replace('Z','+00:00'))
+            if expiry.replace(tzinfo=expiry.tzinfo or timezone.utc) < datetime.now(timezone.utc):
+                return False, 'Greenhouse application deadline has passed', {}
+        except ValueError:
+            return False, 'Invalid Greenhouse application deadline', {}
+    description = BeautifulSoup(html_module.unescape(posting.get('content') or ''),'html.parser').get_text('\n',strip=True)
+    if len(description)<100:
+        return False, 'Greenhouse job description is missing', {}
+    details = {'title':title,'company':company or job['company'],'location':location,
+               'description':description,'posted_at':posting.get('first_published'),
+               'work_type':job.get('work_type',''),'remote':False,
+               'source_url':url,'valid_through':deadline}
+    return True, 'Employer vacancy confirmed by public Greenhouse API', details
+
+
 def candidate_urls(raw):
     options=sorted(raw.get('apply_options') or [],key=lambda x:not x.get('is_direct'))
     return list(dict.fromkeys([x.get('apply_link') for x in options if x.get('apply_link')] +
@@ -200,6 +257,8 @@ def resolve_job(job,force=False,discover=None,run_id=None,web_discover=None):
             try:
                 final,html=read_page(url)
                 valid,note,details=vacancy_details(final,html,job)
+                if not valid and host(final) in {'job-boards.greenhouse.io','boards.greenhouse.io'}:
+                    valid,note,details=greenhouse_vacancy_details(final,html,job)
                 if valid:
                     found=final;evidence=details;return
                 soup=BeautifulSoup(html,'html.parser')
