@@ -109,6 +109,7 @@ def discover_naukri_vacancies(roles: list[str], locations: list[str], days: int,
         return []
     keyword, location = query_choice(roles,locations,run_id or 1)
     payload = {'keyword':keyword,'location':location,'datePosted':str(min(days,30)),
+               'experience':'10+',
                'maxResults':MAX_RESULTS,'fetchDetails':True,'descriptionFormat':'text',
                'postedBy':'Company'}
     call_id = write('INSERT INTO api_calls(run_id,provider,operation,request_json,started_at) '
