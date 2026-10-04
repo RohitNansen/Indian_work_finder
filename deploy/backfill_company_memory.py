@@ -5,10 +5,11 @@ import json
 
 from app.company_memory import remember_company, remember_verified_vacancy
 from app.config import settings
-from app.db import all_rows
+from app.db import all_rows, init_db
 
 
 def backfill() -> tuple[int, int]:
+    init_db()
     jobs = all_rows("SELECT id,source,company,company_url,apply_url,direct_url,direct_status,"
                     "verification_version FROM jobs")
     for job in jobs:
