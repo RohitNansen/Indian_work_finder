@@ -414,7 +414,10 @@ def my_jobs(request: Request):
 def alerts_page(request: Request):
     if response := auth_or_redirect(request):
         return response
-    return page(request, "alerts.html", alerts=all_rows("SELECT * FROM alerts ORDER BY id DESC"),
+    existing=all_rows("SELECT * FROM alerts ORDER BY id DESC")
+    return page(request, "alerts.html", alerts=existing,
+                default_email=(existing[0]['email'] if existing else
+                               's_nansen@yahoo.co.in, anitha.nansen@gmail.com'),
                 profile=one("SELECT * FROM profile WHERE id=1"),
                 delivery_ready=bool(settings.jsearch_api_key and settings.openrouter_api_key
                                     and email_ready()))
