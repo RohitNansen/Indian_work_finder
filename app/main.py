@@ -155,7 +155,7 @@ def home(request: Request):
         return response
     profile = one("SELECT * FROM profile WHERE id=1")
     resume = one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1")
-    latest = all_rows("SELECT r.*, (SELECT COUNT(DISTINCT sr.job_id) FROM search_results sr JOIN job_activity a ON a.job_id=sr.job_id WHERE sr.run_id=r.id AND a.action IN ('listing_opened','application_link_opened')) AS opened_count, (SELECT COUNT(*) FROM search_results sr JOIN job_status st ON st.job_id=sr.job_id WHERE sr.run_id=r.id AND st.status IN ('Applied','Interviewing','Offer','Rejected')) AS applied_count FROM search_runs r ORDER BY id DESC LIMIT 5")
+    latest = all_rows("SELECT r.*, (SELECT COUNT(DISTINCT sr.job_id) FROM search_results sr JOIN jobs j ON j.id=sr.job_id JOIN job_activity a ON a.job_id=sr.job_id WHERE sr.run_id=r.id AND j.direct_status='verified' AND j.verification_version=3 AND a.action IN ('listing_opened','application_link_opened')) AS opened_count, (SELECT COUNT(*) FROM search_results sr JOIN jobs j ON j.id=sr.job_id JOIN job_status st ON st.job_id=sr.job_id WHERE sr.run_id=r.id AND j.direct_status='verified' AND j.verification_version=3 AND st.status IN ('Applied','Interviewing','Offer','Rejected')) AS applied_count FROM search_runs r ORDER BY id DESC LIMIT 5")
     return page(request, "home.html", profile=profile, resume=resume, latest=latest,
                 default_roles=", ".join(DEFAULT_ROLES),
                 role_suggestions=list(dict.fromkeys(labels(profile["role_labels"]) + DEFAULT_ROLES))[:12],
@@ -170,7 +170,7 @@ def profile_page(request: Request):
                 resume=one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1"),
                 evidence=all_rows("SELECT section,employer,role,statement FROM resume_evidence "
                                   "WHERE resume_id=(SELECT MAX(id) FROM resumes) ORDER BY id"),
-                facts=all_rows("SELECT f.*,j.title AS job_title,j.company FROM facts f LEFT JOIN jobs j ON j.id=f.source_job_id WHERE f.active=1 ORDER BY f.id DESC"),
+                facts=all_rows("SELECT f.*,CASE WHEN j.direct_status='verified' AND j.verification_version=3 THEN j.title ELSE 'Previous job question' END AS job_title,CASE WHEN j.direct_status='verified' AND j.verification_version=3 THEN j.company ELSE '' END AS company FROM facts f LEFT JOIN jobs j ON j.id=f.source_job_id WHERE f.active=1 ORDER BY f.id DESC"),
                 candidate_ready=bool(one("SELECT 1 FROM candidate_account WHERE id=1")))
 
 

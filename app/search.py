@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .ai import rank_jobs
+from .ai import rank_jobs, month_spend
 from .config import settings
 from .db import all_rows, connect, one, utcnow, write
 from .evidence import current_evidence, evidence_matches
@@ -124,6 +124,8 @@ def query_queue(roles: list[str], locations: list[str], keywords: list[str] | No
 
 def fetch_page(run_id: int, query: str, remote: bool, cursor: str | None,
                days_recent: int) -> tuple[list[dict], str | None]:
+    if month_spend() >= settings.monthly_spend_limit_usd:
+        raise QuotaExceeded('Monthly app spending limit reached')
     params = {"query": query, "country": "in", "language": "en",
               "date_posted": date_filter(days_recent)}
     if remote:
@@ -312,14 +314,14 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if state['checked']>=settings.openrouter_max_jobs_per_run:state['stop_reason']='Vacancy checking budget reached';break
             query,remote,cursor=queue.popleft();calls+=1;state['queries']+=1;progress('Searching related roles',query)
             try:rows,next_cursor=fetch_page(run_id,query,remote,cursor,days_recent)
-            except QuotaExceeded:quota_limited=True;state['stop_reason']='Provider quota reached';break
+            except QuotaExceeded as exc:quota_limited=True;state['stop_reason']=str(exc);break
             except Exception:failures+=1;continue
             added=ingest(rows);no_new=0 if added else no_new+1
             progress('Reviewing newly found roles',query)
             if calls%3==0:assess(8)
             if next_cursor and added and calls>=len(roles_list):queue.append((query,remote,next_cursor))
             if no_new>=4 and calls>=len(roles_list):state['stop_reason']='Several searches found no new suitable vacancies';break
-        if quota_limited and not seen:raise RuntimeError('JSearch quota reached before any listings could be retrieved')
+        if quota_limited and not seen:raise RuntimeError(state['stop_reason']+' before any listings could be retrieved')
         if len(selected)<count:assess(settings.openrouter_max_jobs_per_run-state['checked'])
         if not state['stop_reason']:
             state['stop_reason']='Requested number found' if len(selected)>=count else 'Search budget completed' if queue else 'Available searches completed'

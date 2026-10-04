@@ -297,7 +297,7 @@ def test_role_search_includes_selected_keywords_and_rotates_places():
 def test_exhausted_job_quota_does_not_report_zero_suitable_jobs(test_env, monkeypatch):
     object.__setattr__(settings, "jsearch_api_key", "test-key")
     monkeypatch.setattr(search, "fetch_page", lambda *args: (_ for _ in ()).throw(search.QuotaExceeded("limit")))
-    with pytest.raises(RuntimeError, match="quota reached"):
+    with pytest.raises(RuntimeError, match="before any listings could be retrieved"):
         search.run_search(kind="manual", roles="R&D Head", keywords="",
                           locations="Chennai", work_types="", count=5)
     run = db.one("SELECT status,error FROM search_runs ORDER BY id DESC LIMIT 1")

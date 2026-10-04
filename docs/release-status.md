@@ -1,5 +1,18 @@
 # Release status and change record
 
+## Search and document update — 4 October 2026
+
+The app at https://hithanis.com/job-finder/ uses a password-only candidate login. Activity is inaccessible to that session. Search defaults to 10 jobs from the last 30 days, with 60- and 90-day options, related role and skill searches, live progress counts, and employer-vacancy verification before curation. Historical unverified results are removed from candidate shortlists. Their prior records remain in the audit database.
+
+The mandatory verification checks the employer page’s vacancy title, company, actual vacancy location, full description, posting date, and closure evidence. It rejects the previously misdirected Head of R&D to Head of Sales link. The current conservative check requires a machine-readable JobPosting on the employer site. Some legitimate employer pages lack that data and will therefore be omitted.
+
+Two capped real-profile pilot searches retrieved 90 and 79 listings, checked 40 employer vacancies each, and shortlisted **one verified role per run**. These were Hitachi Energy’s R&D Team Manager in Chennai and Cisco’s Leader, Hardware Engineering in Bangalore. Total tracked pilot API/model cost was about US$0.23. A 10-job shortlist has **not** been demonstrated with the current source. The [API evaluation](job-api-options-2026-10-04.md) recommends a small independent-source pilot before paying for a larger JSearch tier.
+
+The supplied original editable Word resume is now the active source. The two former failure proposals exported to three-page Word and PDF files with all four tested edits; all pages were rendered and visually inspected against the source. Earlier PDF-source exports were likewise rerendered after correcting column preservation. Future arbitrary edits can still exceed the available layout; the app flags those and retains the original wording visibly.
+
+Saved experience answers remain separate from resume extraction and survive a new upload. Newly created alerts start paused. The standing pause was reapplied to all existing alerts on 4 October; the VM log showed two digest sends on 3 and 4 October before it was reapplied. The login, resume, alert controls and navigation were checked in the browser. 37 automated tests passed. Existing Nginx routes and the two other apps were not changed.
+
+
 ## Candidate experience release — 26 September 2026
 
 Deployed at https://hithanis.com/job-finder/. The [task sheet](upgrade-2026-09-26.md) records PBIs, acceptance criteria and test scenarios. Git commits record each change.
