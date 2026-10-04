@@ -544,7 +544,8 @@ def companies_page(request: Request):
         "SELECT c.*,COUNT(o.id) AS listings_seen FROM companies c "
         "LEFT JOIN company_observations o ON o.company_id=c.id "
         "GROUP BY c.id ORDER BY c.verified_at IS NULL,c.last_seen_at DESC,c.name LIMIT 500"),
-        total=one("SELECT COUNT(*) AS n FROM companies")["n"])
+        total=one("SELECT COUNT(*) AS n FROM companies")["n"],
+        lead_count=one("SELECT COUNT(*) AS n FROM source_leads WHERE provider='Apify Naukri'")["n"])
 
 
 @app.post("/jobs/{job_id}/resume/propose")
