@@ -9,7 +9,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
 
-from .ai import rank_jobs, month_spend
+from .ai import rank_jobs
+from .budget import BudgetExceeded, reserve_call
 from .config import settings
 from .db import all_rows, connect, one, utcnow, write
 from .evidence import current_evidence, evidence_matches
@@ -132,18 +133,16 @@ def query_queue(roles: list[str], locations: list[str], keywords: list[str] | No
 
 def fetch_page(run_id: int, query: str, remote: bool, cursor: str | None,
                days_recent: int) -> tuple[list[dict], str | None]:
-    if month_spend() >= settings.monthly_spend_limit_usd:
-        raise QuotaExceeded('Monthly app spending limit reached')
     params = {"query": query, "country": "in", "language": "en",
               "date_posted": date_filter(days_recent)}
     if remote:
         params["work_from_home"] = "true"
     if cursor:
         params["cursor"] = cursor
-    call_id = write(
-        "INSERT INTO api_calls(run_id,provider,operation,request_json,started_at) VALUES(?,?,?,?,?)",
-        (run_id, "JSearch", "search-v2", json.dumps(params), utcnow()),
-    )
+    try:
+        call_id = reserve_call(run_id,"JSearch","search-v2",json.dumps(params),0.005)
+    except BudgetExceeded as exc:
+        raise QuotaExceeded(str(exc)) from exc
     try:
         with httpx.Client(timeout=45) as client:
             response = client.get(

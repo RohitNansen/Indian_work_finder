@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import httpx
 
 from .alerts import send_email
+from .budget import monthly_limit
 from .config import settings
 from .db import all_rows, connect, init_db, one, utcnow, write
 
@@ -47,8 +48,10 @@ def notify(provider: str, name: str, period: str, threshold: int,
             notification_id = cursor.lastrowid
     usage = (f"{used:g} of {limit:g}" if used is not None and limit is not None
              else "The provider reported a limit or quota error")
-    message = (f"<p><strong>{html.escape(provider)} — {html.escape(name)}</strong> has reached "
-               f"the {threshold}% alert level.</p><p>Usage: {html.escape(usage)}. "
+    heading = ('Paid API requests have been paused before the monthly stop amount.'
+               if provider == 'Job Finder' and name == 'monthly API spending stop'
+               else f'{html.escape(provider)} — {html.escape(name)} has reached the {threshold}% alert level.')
+    message = (f"<p><strong>{heading}</strong></p><p>Usage: {html.escape(usage)}. "
                f"Status: {html.escape(status or 'check the provider dashboard')}.</p>"
                f"<p>Period: {html.escape(period)}. Review the app's private Activity page "
                "and your provider account before further searches.</p>")
@@ -125,7 +128,7 @@ def local_quotas() -> None:
     cost = one("SELECT COALESCE(SUM(estimated_cost_usd),0) AS total FROM api_calls "
                "WHERE started_at LIKE ?", (f"{month}%",))["total"]
     evaluate("Job Finder", "configured monthly API spend", month,
-             float(cost), settings.monthly_spend_limit_usd)
+             float(cost), monthly_limit())
     sent_month = one("SELECT COALESCE(SUM(recipient_count),0) AS n FROM email_runs WHERE status='sent' AND sent_at LIKE ?",
                      (f"{month}%",))["n"]
     sent_day = one("SELECT COALESCE(SUM(recipient_count),0) AS n FROM email_runs WHERE status='sent' AND sent_at LIKE ?",

@@ -97,6 +97,17 @@ CREATE TABLE IF NOT EXISTS api_calls (
   completed_at TEXT, error TEXT,
   FOREIGN KEY(run_id) REFERENCES search_runs(id)
 );
+CREATE TABLE IF NOT EXISTS budget_settings (
+  id INTEGER PRIMARY KEY CHECK(id=1), monthly_limit_usd REAL NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS source_leads (
+  provider TEXT NOT NULL, source_job_key TEXT NOT NULL,
+  company TEXT NOT NULL, title TEXT NOT NULL, location TEXT NOT NULL DEFAULT '',
+  posted_at TEXT, source_url TEXT, raw_json TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+  PRIMARY KEY(provider,source_job_key)
+);
 CREATE TABLE IF NOT EXISTS search_results (
   run_id INTEGER NOT NULL, job_id TEXT NOT NULL, rank INTEGER NOT NULL,
   internal_score REAL NOT NULL, why TEXT NOT NULL DEFAULT '',
@@ -173,6 +184,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_seen ON jobs(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_company_observations_company ON company_observations(company_id);
 CREATE INDEX IF NOT EXISTS idx_activity_job ON job_activity(job_id,occurred_at);
 CREATE INDEX IF NOT EXISTS idx_api_run ON api_calls(run_id);
+CREATE INDEX IF NOT EXISTS idx_source_leads_seen ON source_leads(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_quota_provider ON quota_checks(provider,checked_at);
 CREATE INDEX IF NOT EXISTS idx_resume_evidence ON resume_evidence(resume_id,section);
 """

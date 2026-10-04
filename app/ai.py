@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from .config import settings
+from .budget import month_spend, reserve_call
 from .db import one, utcnow, write
 
 MODEL_PRICES = {
@@ -28,26 +29,16 @@ def estimated_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     return (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
 
 
-def month_spend() -> float:
-    row = one(
-        "SELECT COALESCE(SUM(estimated_cost_usd),0) AS total FROM api_calls "
-        "WHERE started_at >= strftime('%Y-%m-01T00:00:00','now')"
-    )
-    return float(row["total"] if row else 0)
-
-
 def ask_json(*, run_id: int | None, operation: str, instructions: str,
              content: dict[str, Any], schema: dict[str, Any],
              model: str | None = None, web_search: dict | None = None) -> dict[str, Any]:
     if not settings.openrouter_api_key:
         raise RuntimeError("OpenRouter is not configured yet")
-    if month_spend() >= settings.monthly_spend_limit_usd:
-        raise RuntimeError("Monthly API spending limit reached")
     model = model or settings.openrouter_model
-    call_id = write(
-        "INSERT INTO api_calls(run_id,provider,operation,request_json,started_at) VALUES(?,?,?,?,?)",
-        (run_id, "OpenRouter", operation,
-         json.dumps({"model": model, "content_keys": list(content), "web_search": web_search, **({"query":content} if web_search else {})}, ensure_ascii=False), utcnow()),
+    call_id = reserve_call(
+        run_id, "OpenRouter", operation,
+        json.dumps({"model": model, "content_keys": list(content), "web_search": web_search, **({"query":content} if web_search else {})}, ensure_ascii=False),
+        0.50,
     )
     payload = {
         "model": model,
@@ -61,6 +52,7 @@ def ask_json(*, run_id: int | None, operation: str, instructions: str,
         },
         "provider": {"require_parameters": True},
         "temperature": 0,
+        "max_tokens": 3500,
     }
     if web_search:
         payload["plugins"] = [{"id":"web", "engine":"parallel", "mode":"basic", "max_results":5, **web_search}]

@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from .ai import extract_profile, propose_resume_edits
 from .auth import session_value, session_role, password_hash, check_password, login_allowed, record_failure
 from .alerts import email_ready, parse_recipients
+from .budget import monthly_limit, month_spend, search_count, set_monthly_limit
 from .config import settings
 from .db import all_rows, connect, init_db, one, utcnow, write
 from .evidence import store_evidence
@@ -517,7 +518,21 @@ def api_use_page(request: Request):
                 month_total=one("SELECT COALESCE(SUM(estimated_cost_usd),0) AS cost,COUNT(*) AS calls FROM api_calls WHERE substr(started_at,1,7)=?", (month,)),
                 by_provider=all_rows("SELECT provider,COUNT(*) AS calls,SUM(COALESCE(response_count,0)) AS returned,COALESCE(SUM(estimated_cost_usd),0) AS cost FROM api_calls WHERE substr(started_at,1,7)=? GROUP BY provider ORDER BY cost DESC", (month,)),
                 by_run=all_rows("SELECT r.id,r.started_at,r.kind,r.status,r.shortlisted_count,COUNT(c.id) AS calls,COALESCE(SUM(c.estimated_cost_usd),0) AS cost FROM search_runs r LEFT JOIN api_calls c ON c.run_id=r.id GROUP BY r.id ORDER BY r.id DESC LIMIT 30"),
-                monthly_limit=settings.monthly_spend_limit_usd)
+                monthly_limit=monthly_limit(), owner_ceiling=settings.monthly_spend_limit_usd,
+                monthly_searches=search_count(), remaining=max(0,monthly_limit()-month_spend()),
+                limit_saved=request.query_params.get('saved')=='1')
+
+
+@app.post('/api-use/limit')
+async def update_api_limit(request: Request):
+    await check_post(request)
+    require_admin(request)
+    form=await request.form()
+    try:
+        set_monthly_limit(float(str(form.get('monthly_limit_usd',''))))
+    except (TypeError,ValueError):
+        raise HTTPException(400,'Enter an amount from $1 to the owner ceiling')
+    return RedirectResponse('/api-use?saved=1',status_code=303)
 
 
 @app.get("/companies", response_class=HTMLResponse)

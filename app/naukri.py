@@ -8,8 +8,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .ai import month_spend
-from .company_memory import remember_company
+from .budget import BudgetExceeded, reserve_call
+from .company_memory import remember_company, remember_source_lead
 from .config import settings
 from .db import utcnow, write
 
@@ -107,15 +107,18 @@ def to_raw(row: dict) -> dict | None:
 
 def discover_naukri_vacancies(roles: list[str], locations: list[str], days: int,
                               run_id: int | None) -> list[dict]:
-    if not settings.apify_token or month_spend() + START_PRICE_USD >= settings.monthly_spend_limit_usd:
+    if not settings.apify_token:
         return []
     keyword, location = query_choice(roles,locations,run_id or 1)
     payload = {'keyword':keyword,'location':location,'datePosted':str(min(days,30)),
                'experience':'10+',
                'maxResults':MAX_RESULTS,'fetchDetails':True,'descriptionFormat':'text',
                'postedBy':'Company'}
-    call_id = write('INSERT INTO api_calls(run_id,provider,operation,request_json,started_at) '
-                    'VALUES(?,?,?,?,?)', (run_id,'Apify','naukri_discovery',json.dumps(payload),utcnow()))
+    try:
+        call_id = reserve_call(run_id,'Apify','naukri_discovery',json.dumps(payload),
+                               START_PRICE_USD+MAX_RESULTS*PRICE_PER_RESULT_USD)
+    except BudgetExceeded:
+        return []
     actor_run_id = None
     try:
         with httpx.Client(timeout=25, trust_env=False,
@@ -143,6 +146,7 @@ def discover_naukri_vacancies(roles: list[str], locations: list[str], days: int,
                 remember_company(str(item.get('companyName') or ''),'Apify Naukri',
                                  str(item.get('jobId') or item.get('portalUrl') or ''),
                                  item.get('companyWebsite'))
+                remember_source_lead('Apify Naukri',item)
         estimate=START_PRICE_USD+PRICE_PER_RESULT_USD*len(items)
         write('UPDATE api_calls SET request_json=?,response_count=?,http_status=200,'
               'estimated_cost_usd=?,completed_at=? WHERE id=?',

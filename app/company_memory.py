@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import json
 from urllib.parse import urlparse
 
 from .db import connect, one, utcnow
@@ -53,6 +54,27 @@ def remember_raw(raw: dict) -> None:
     key = raw.get("job_uid") or raw.get("job_id") or raw.get("job_apply_link")
     if name and key:
         remember_company(str(name), str(source), str(key), raw.get("employer_website"))
+
+
+def remember_source_lead(provider: str, item: dict) -> None:
+    """Retain every source listing, even when it cannot be shortlisted yet."""
+    key = item.get('jobId')
+    if not key:
+        return
+    now = utcnow()
+    with connect() as db:
+        db.execute(
+            'INSERT INTO source_leads(provider,source_job_key,company,title,location,'
+            'posted_at,source_url,raw_json,first_seen_at,last_seen_at) '
+            'VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(provider,source_job_key) DO UPDATE SET '
+            'company=excluded.company,title=excluded.title,location=excluded.location,'
+            'posted_at=excluded.posted_at,source_url=excluded.source_url,'
+            'raw_json=excluded.raw_json,last_seen_at=excluded.last_seen_at',
+            (provider,str(key),str(item.get('companyName') or '')[:250],
+             str(item.get('title') or '')[:300],str(item.get('location') or '')[:250],
+             item.get('createdDate'),item.get('portalUrl'),
+             json.dumps(item,ensure_ascii=False),now,now),
+        )
 
 
 def remember_verified_vacancy(name: str, vacancy_url: str,
