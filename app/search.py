@@ -178,6 +178,28 @@ def fetch_page(run_id: int, query: str, remote: bool, cursor: str | None,
         raise
 
 
+def jsearch_has_capacity() -> bool:
+    """Use the provider's free usage endpoint before spending a search request."""
+    if not settings.jsearch_api_key:
+        return False
+    try:
+        with httpx.Client(timeout=12) as client:
+            response=client.get('https://api.openwebninja.com/usage',
+                                params={'api_id':'jsearch'},
+                                headers={'x-api-key':settings.jsearch_api_key})
+        response.raise_for_status()
+        data=response.json().get('data') or {}
+        quotas=data.get('quotas') or []
+        exhausted=any(q.get('name')=='Requests' and (
+            q.get('remaining') is not None and float(q['remaining'])<=0 or
+            q.get('used') is not None and q.get('limit') is not None and
+            float(q['used'])>=float(q['limit'])) for q in quotas)
+        return not exhausted and data.get('status') not in {'exceeded','limit_reached'}
+    except Exception:
+        # Transient usage-endpoint failure must not disable an otherwise usable key.
+        return True
+
+
 def save_job(raw: dict) -> dict:
     remember_raw(raw)
     jid = job_key(raw)
@@ -230,6 +252,21 @@ def deterministic_score(job: dict, roles: list[str], keywords: list[str], profil
     return score
 
 
+def plausible_physical_role(job: dict) -> bool:
+    """Do not spend verification calls on plainly unrelated software roles."""
+    title=normalize(job.get('title',''))
+    if any(term in title for term in ('sales','marketing','recruiter','talent acquisition',
+                                      'accounts payable','finance','human resources',
+                                      'selenium','playwright','devops','cloud platform',
+                                      'frontend','backend','full stack','data engineer')):
+        return False
+    if 'software' in title and not any(term in title for term in (
+            'embedded','firmware','medical device','hardware','electronics','electrical',
+            'industrial control','product engineering')):
+        return False
+    return True
+
+
 def profile_context() -> str:
     profile = one("SELECT * FROM profile WHERE id=1")
     resume = one("SELECT resume_text FROM resumes ORDER BY id DESC LIMIT 1")
@@ -254,6 +291,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     from .ats_feeds import discover_ats_vacancies
     from .company_memory import watched_company_sites, candidate_company_sites, seed_career_sites
     from .naukri import discover_naukri_vacancies
+    from .employer_indexes import discover_baxter_vacancies
     if not settings.jsearch_api_key:raise RuntimeError("JSearch is not configured yet")
     roles_list=labels(roles) or DEFAULT_ROLES
     location_list=labels(locations) or ['Chennai','Tamil Nadu','Bengaluru','Remote India']
@@ -300,7 +338,8 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     def assess(limit=8):
         available=[j for jid,j in seen.items() if jid not in processed and jid not in previous_ids
                    and normalized_link(j.get('direct_url')) not in previous_urls]
-        available=[j for j in available if not any(term in normalize(j['title']) for term in ('junior','intern','trainee','entry level'))]
+        available=[j for j in available if plausible_physical_role(j) and not any(
+            term in normalize(j['title']) for term in ('junior','intern','trainee','entry level'))]
         available.sort(key=lambda j:(industry_priority(j,industry_list),
                                      -deterministic_score(j,roles_list,keywords_list,context)))
         verified=[]
@@ -337,11 +376,19 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     try:
         seed_career_sites()
         queue=query_queue(roles_list,location_list,keywords_list,industry_list)
+        jsearch_ready=jsearch_has_capacity()
+        if not jsearch_ready:
+            quota_limited=True
+            state['stop_reason']='JSearch monthly request quota reached; checking other sources'
         preferred_request_count=min(6,len(preferred_queries(industry_list,location_list)))
         no_new=0
         progress('Checking employer job boards')
         ingest(discover_ats_vacancies(run_id))
         assess(6)
+        state['queries']+=1
+        progress('Checking a medical employer career index','Baxter')
+        ingest(discover_baxter_vacancies(location_list,days_recent,run_id))
+        assess(8)
         # Revisit saved employers before aggregators consume the vacancy-check
         # allowance. Candidate sites are only hints; every job still passes
         # the same individual employer-vacancy verification.
@@ -370,7 +417,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                 progress('Searching Naukri for transferable roles')
                 ingest(discover_naukri_vacancies(roles_list,location_list,days_recent,run_id,[],variant=1))
                 assess(6)
-        while queue and calls<min(preferred_request_count,settings.jsearch_max_requests_per_run):
+        while jsearch_ready and queue and calls<min(preferred_request_count,settings.jsearch_max_requests_per_run):
             if time.monotonic()-started>settings.search_time_limit_seconds:
                 state['stop_reason']='Search time limit reached';break
             if state['checked']>=settings.openrouter_max_jobs_per_run:
@@ -384,15 +431,15 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                 failures+=1;continue
             added=ingest(rows);no_new=0 if added else no_new+1
             if calls%2==0:assess(10)
-        if not quota_limited and not state['stop_reason']:assess(10)
+        if state['checked']<settings.openrouter_max_jobs_per_run:assess(10)
         # A small direct-career search complements the aggregator with different sources.
         groups=[roles_list[i:i+2] for i in range(0,len(roles_list),2)]
         for group in groups:
-            if not group or quota_limited or state['stop_reason'] or new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
+            if not group or new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2) or time.monotonic()-started>settings.search_time_limit_seconds:break
             web_calls+=1;state['queries']+=1;progress('Searching company career pages',', '.join(group))
             ingest(discover_employer_vacancies(group,location_list,days_recent,run_id,keywords_list))
             if new_matches()>=count:break
-        if not quota_limited and not state['stop_reason']:assess(12)
+        if state['checked']<settings.openrouter_max_jobs_per_run:assess(12)
         no_new=0
         while queue and not quota_limited and not state['stop_reason'] and calls<settings.jsearch_max_requests_per_run and new_matches()<count:
             if time.monotonic()-started>settings.search_time_limit_seconds:state['stop_reason']='Search time limit reached';break
@@ -406,7 +453,8 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if calls%3==0:assess(8)
             if next_cursor and added and calls>=len(roles_list):queue.append((query,remote,next_cursor))
             if no_new>=8 and calls>=max(12,len(roles_list)):state['stop_reason']='Several searches found no new suitable vacancies';break
-        if quota_limited and not seen:raise RuntimeError(state['stop_reason']+' before any listings could be retrieved')
+        # An exhausted discovery provider does not prevent the independent
+        # employer and Naukri sources from returning a valid empty result.
         if len(selected)<count:assess(settings.openrouter_max_jobs_per_run-state['checked'])
         if not state['stop_reason']:
             state['stop_reason']=('Requested number of new jobs found' if new_matches()>=count

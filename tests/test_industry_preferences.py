@@ -51,7 +51,7 @@ def test_industry_choice_is_saved_and_sent_to_search(client, monkeypatch):
 
 
 def test_search_prefers_medical_but_keeps_other_suitable_jobs(test_env, monkeypatch):
-    from app import ats_feeds, direct_links
+    from app import ats_feeds, direct_links, employer_indexes
 
     original_key = settings.jsearch_api_key
     original_model_key = settings.openrouter_api_key
@@ -69,6 +69,7 @@ def test_search_prefers_medical_but_keeps_other_suitable_jobs(test_env, monkeypa
     ]
     queries = []
     monkeypatch.setattr(ats_feeds, 'discover_ats_vacancies', lambda *args: entries)
+    monkeypatch.setattr(employer_indexes, 'discover_baxter_vacancies', lambda *args: [])
     monkeypatch.setattr(direct_links, 'resolve_job', lambda job, **kw: dict(
         job, direct_status='verified', direct_url=job['apply_url']))
     monkeypatch.setattr(direct_links, 'discover_employer_vacancies', lambda *args: [])

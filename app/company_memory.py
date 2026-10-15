@@ -11,6 +11,7 @@ from .db import connect, one, utcnow
 # individual vacancy still needs independent employer-page verification.
 MEDICAL_CAREER_SEEDS = (
     ('Baxter', 'https://jobs.baxter.com/en/'),
+    ('Radiometer', 'https://jobs.danaher.com/global/en/radiometer'),
     ('Healthium Medtech', 'https://www.healthiummedtech.com/careers/'),
     ('BPL Medical Technologies', 'https://www.bplmedicaltechnologies.com/careers/'),
     ('InnAccel Technologies', 'https://innaccel.com/careers/'),

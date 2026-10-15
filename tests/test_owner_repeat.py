@@ -26,8 +26,9 @@ def test_owner_cost_view_is_private(test_env):
 
 
 def test_repeat_search_recommends_next_new_role_only(test_env, monkeypatch):
-    from app import direct_links, ats_feeds
+    from app import direct_links, ats_feeds, employer_indexes
     monkeypatch.setattr(ats_feeds, 'discover_ats_vacancies', lambda *args: [])
+    monkeypatch.setattr(employer_indexes, 'discover_baxter_vacancies', lambda *args: [])
     original_key = settings.jsearch_api_key
     original_model_key = settings.openrouter_api_key
     original_requests = settings.jsearch_max_requests_per_run
@@ -71,8 +72,9 @@ def test_repeat_search_recommends_next_new_role_only(test_env, monkeypatch):
 
 
 def test_same_employer_vacancy_from_new_source_id_is_not_recommended_again(test_env, monkeypatch):
-    from app import direct_links, ats_feeds
+    from app import direct_links, ats_feeds, employer_indexes
     monkeypatch.setattr(ats_feeds, 'discover_ats_vacancies', lambda *args: [])
+    monkeypatch.setattr(employer_indexes, 'discover_baxter_vacancies', lambda *args: [])
     monkeypatch.setattr(direct_links, 'discover_employer_vacancies', lambda *a, **k: [])
     monkeypatch.setattr(direct_links, 'resolve_job', lambda job, **kw: dict(
         job, direct_status='verified', direct_url='https://employer.example/careers?id=123'))

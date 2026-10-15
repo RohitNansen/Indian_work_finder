@@ -1,7 +1,11 @@
 from app.company_memory import (candidate_company_sites, mark_company_scanned,
                                 seed_career_sites, remember_verified_vacancy)
-from app.direct_links import discover_watched_company_vacancies
+from app.direct_links import (discover_watched_company_vacancies, cited_employer_vacancy,
+                              vacancy_details)
 from app.matching import location_matches, search_places
+from app.search import plausible_physical_role, jsearch_has_capacity
+from datetime import datetime,timezone,timedelta
+import json
 
 
 def test_south_india_is_a_real_location_filter():
@@ -44,3 +48,84 @@ def test_unverified_career_hint_searches_domain_but_does_not_trust_it(test_env, 
     assert jobs[0]['employer_website']==''
     assert jobs[0]['source']=='Saved company career hint'
     assert recorded[0]['web_search']['include_domains']==['jobs.baxter.com']
+
+
+def test_cited_official_posting_is_recovered_with_its_own_date_and_location(test_env, monkeypatch):
+    from app import direct_links
+    url='https://jobs.baxter.com/en/job/bengaluru/head-of-quality/152/123'
+    posting={'@type':'JobPosting','title':'Head of Quality',
+             'hiringOrganization':{'name':'Baxter'},
+             'datePosted':(datetime.now(timezone.utc)-timedelta(days=2)).date().isoformat(),
+             'jobLocation':{'address':{'addressLocality':'Bengaluru',
+                                       'addressRegion':'Karnataka','addressCountry':'IN'}},
+             'description':'Lead medical device design quality, verification and product development. '*3}
+    html='<html><h1>Head of Quality</h1><script type="application/ld+json">'+json.dumps(posting)+'</script></html>'
+    monkeypatch.setattr(direct_links,'read_page',lambda _: (url,html))
+    job=cited_employer_vacancy(url,'Baxter','',30)
+    assert job['job_title']=='Head of Quality'
+    assert job['job_location']=='Bengaluru, Karnataka, IN'
+    assert job['job_posted_at_datetime_utc']==posting['datePosted']
+    assert cited_employer_vacancy(url,'Another Company','',30) is None
+    posting['datePosted']=(datetime.now(timezone.utc)-timedelta(days=70)).date().isoformat()
+    html='<html><script type="application/ld+json">'+json.dumps(posting)+'</script></html>'
+    assert cited_employer_vacancy(url,'Baxter','',30) is None
+
+
+def test_obvious_software_and_sales_roles_do_not_use_vacancy_checks():
+    assert not plausible_physical_role({'title':'Senior Software Quality Engineer - Selenium'})
+    assert not plausible_physical_role({'title':'Head of Sales'})
+    assert plausible_physical_role({'title':'Medical Device Hardware Engineering Manager'})
+    assert plausible_physical_role({'title':'Head of Quality'})
+
+
+def test_baxter_index_scans_only_location_and_topic_jobs(test_env,monkeypatch):
+    from app import employer_indexes
+    calls=[]
+    html='''<a href="/en/job/bengaluru/senior-quality/152/1">Senior Engineer, Quality Bengaluru, Karnataka</a>
+            <a href="/en/job/mumbai/senior-quality/152/2">Senior Engineer, Quality Mumbai, Maharashtra</a>
+            <a href="/en/job/bengaluru/sales/152/3">Head of Sales Bengaluru, Karnataka</a>'''
+    monkeypatch.setattr(employer_indexes,'read_page',lambda url:(url,html))
+    def official(url,*args):
+        calls.append(url)
+        return {'job_uid':url,'job_title':'Senior Engineer, Quality'}
+    monkeypatch.setattr(employer_indexes,'cited_employer_vacancy',official)
+    rows=employer_indexes.discover_baxter_vacancies(['South India'],30)
+    assert len(rows)==1
+    assert calls==['https://jobs.baxter.com/en/job/bengaluru/senior-quality/152/1']
+
+
+def test_danaher_parent_site_requires_named_subsidiary(test_env,monkeypatch):
+    from app import direct_links
+    url='https://jobs.danaher.com/global/en/job/R1318481'
+    posting={'@type':'JobPosting','title':'Engineering Manager, Verification and Validation',
+             'hiringOrganization':{'name':'Danaher'},
+             'datePosted':(datetime.now(timezone.utc)-timedelta(days=2)).date().isoformat(),
+             'jobLocation':{'address':{'addressLocality':'Bengaluru','addressCountry':'IN'}},
+             'description':'Radiometer develops clinical diagnostic devices. Lead verification and validation of medical products. '*3}
+    html='<h1>Engineering Manager, Verification and Validation</h1><script type="application/ld+json">'+json.dumps(posting)+'</script>'
+    job={'title':posting['title'],'company':'Radiometer','company_url':'https://radiometer.com',
+         'location':'Bengaluru'}
+    assert vacancy_details(url,html,job)[0]
+    monkeypatch.setattr(direct_links,'read_page',lambda _: (url,html))
+    assert cited_employer_vacancy(url,'Radiometer','',30)['employer_name']=='Radiometer'
+    posting['description']=posting['description'].replace('Radiometer','Acme')
+    html='<h1>'+posting['title']+'</h1><script type="application/ld+json">'+json.dumps(posting)+'</script>'
+    assert not vacancy_details(url,html,job)[0]
+    assert cited_employer_vacancy(url,'Radiometer','',30) is None
+
+
+def test_jsearch_usage_skips_exhausted_free_plan(test_env,monkeypatch):
+    from app import search
+    from app.config import settings
+    object.__setattr__(settings,'jsearch_api_key','dummy')
+    class Response:
+        def raise_for_status(self):pass
+        def json(self):return {'data':{'status':'exceeded','quotas':[
+            {'name':'Requests','used':202,'limit':200}]}}
+    class Client:
+        def __init__(self,**kwargs):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def get(self,*args,**kwargs):return Response()
+    monkeypatch.setattr(search.httpx,'Client',Client)
+    assert not jsearch_has_capacity()
