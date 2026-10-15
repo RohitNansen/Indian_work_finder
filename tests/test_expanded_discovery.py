@@ -129,3 +129,28 @@ def test_jsearch_usage_skips_exhausted_free_plan(test_env,monkeypatch):
         def get(self,*args,**kwargs):return Response()
     monkeypatch.setattr(search.httpx,'Client',Client)
     assert not jsearch_has_capacity()
+
+
+def test_radiometer_sitemap_rotates_official_vacancy_checks(test_env,monkeypatch):
+    from app import employer_indexes
+    base='https://jobs.danaher.com/global/en/job/'
+    xml=('<urlset><url><loc>'+base+'DANAGLOBALR1318481EXTERNAL/Engineering-Manager-Verification-Validation'
+         '</loc></url><url><loc>'+base+'DANAGLOBALR1318482EXTERNAL/Senior-Quality-Manager'
+         '</loc></url></urlset>').encode()
+    class Response:
+        content=xml
+        def raise_for_status(self):pass
+    class Client:
+        def __init__(self,**kwargs):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def get(self,*args):return Response()
+    calls=[]
+    monkeypatch.setattr(employer_indexes.httpx,'Client',Client)
+    monkeypatch.setattr(employer_indexes,'cited_employer_vacancy',
+                        lambda url,*args:(calls.append(url) or {'job_uid':url}))
+    assert len(employer_indexes.discover_radiometer_sitemap_vacancies(30))==2
+    assert len(set(calls))==2
+    calls.clear()
+    assert len(employer_indexes.discover_radiometer_sitemap_vacancies(30))==2
+    assert len(calls)==2

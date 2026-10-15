@@ -291,7 +291,8 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     from .ats_feeds import discover_ats_vacancies
     from .company_memory import watched_company_sites, candidate_company_sites, seed_career_sites
     from .naukri import discover_naukri_vacancies
-    from .employer_indexes import discover_baxter_vacancies
+    from .employer_indexes import (discover_baxter_vacancies,
+                                   discover_radiometer_sitemap_vacancies)
     if not settings.jsearch_api_key:raise RuntimeError("JSearch is not configured yet")
     roles_list=labels(roles) or DEFAULT_ROLES
     location_list=labels(locations) or ['Chennai','Tamil Nadu','Bengaluru','Remote India']
@@ -388,6 +389,10 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         state['queries']+=1
         progress('Checking a medical employer career index','Baxter')
         ingest(discover_baxter_vacancies(location_list,days_recent,run_id))
+        assess(8)
+        state['queries']+=1
+        progress('Checking a medical employer career index','Radiometer')
+        ingest(discover_radiometer_sitemap_vacancies(days_recent,run_id))
         assess(8)
         # Revisit saved employers before aggregators consume the vacancy-check
         # allowance. Candidate sites are only hints; every job still passes
