@@ -235,16 +235,18 @@ async def search(request: Request, background: BackgroundTasks):
         if days not in {1,3,7,30,60,90}:raise ValueError()
     except ValueError:
         raise HTTPException(400,"Choose a listed job count and date range")
+    existing_industries=one("SELECT industry_preferences FROM profile WHERE id=1")["industry_preferences"]
     args=dict(kind="manual",roles=str(form.get("roles",""))[:2000],
               keywords=str(form.get("keywords",""))[:2000],locations=str(form.get("locations",""))[:1000],
-              work_types=str(form.get("work_types",""))[:500],count=count,days_recent=days)
+              work_types=str(form.get("work_types",""))[:500],
+              industries=str(form.get("industries",existing_industries))[:1000],count=count,days_recent=days)
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
         running=db.execute("SELECT id FROM search_runs WHERE status='running' ORDER BY id DESC LIMIT 1").fetchone()
         if running:
             return RedirectResponse(f"/runs/{running['id']}",status_code=303)
-        db.execute("UPDATE profile SET role_labels=?,keywords=?,locations=?,work_types=?,updated_at=? WHERE id=1",
-                   (args['roles'],args['keywords'],args['locations'],args['work_types'],utcnow()))
+        db.execute("UPDATE profile SET role_labels=?,keywords=?,locations=?,work_types=?,industry_preferences=?,updated_at=? WHERE id=1",
+                   (args['roles'],args['keywords'],args['locations'],args['work_types'],args['industries'],utcnow()))
         run_id=db.execute("INSERT INTO search_runs(kind,started_at,parameters_json) VALUES('manual',?,?)",
                           (utcnow(),json.dumps(args))).lastrowid
     def finish_search():

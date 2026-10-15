@@ -12,6 +12,7 @@ from .budget import BudgetExceeded, reserve_call
 from .company_memory import remember_company, remember_source_lead
 from .config import settings
 from .db import utcnow, write
+from .industries import families
 
 ACTOR = 'blackfalcondata~naukri-jobs-feed'
 MAX_RESULTS = 25
@@ -44,7 +45,8 @@ def query_for_role(role: str) -> str:
     return role[:80]
 
 
-def query_choice(roles: list[str], locations: list[str], run_id: int) -> tuple[str, str]:
+def query_choice(roles: list[str], locations: list[str], run_id: int,
+                 industries: list[str] | None = None) -> tuple[str, str]:
     roles = roles or ['R&D Director']
     cities = []
     for location in locations:
@@ -60,6 +62,18 @@ def query_choice(roles: list[str], locations: list[str], run_id: int) -> tuple[s
     number = max(0, run_id - 1)
     role = roles[(number // len(cities)) % len(roles)]
     city = cities[number % len(cities)]
+    preference = families(industries or [])
+    if preference and preference[0] == 'medical':
+        title = role.lower()
+        if 'quality' in title:
+            return 'medical device quality head', city
+        if 'hardware' in title or 'electronics' in title or 'electrical' in title:
+            return 'medical device hardware engineering', city
+        if 'automation' in title:
+            return 'pharmaceutical equipment automation lead', city
+        return 'medical device R&D lead', city
+    if preference and preference[0] == 'textile':
+        return 'textile machinery R&D head', city
     return query_for_role(role), city
 
 
@@ -106,10 +120,11 @@ def to_raw(row: dict) -> dict | None:
 
 
 def discover_naukri_vacancies(roles: list[str], locations: list[str], days: int,
-                              run_id: int | None) -> list[dict]:
+                              run_id: int | None,
+                              industries: list[str] | None = None) -> list[dict]:
     if not settings.apify_token:
         return []
-    keyword, location = query_choice(roles,locations,run_id or 1)
+    keyword, location = query_choice(roles,locations,run_id or 1,industries)
     payload = {'keyword':keyword,'location':location,'datePosted':str(min(days,30)),
                'experience':'10+',
                'maxResults':MAX_RESULTS,'fetchDetails':True,'descriptionFormat':'text',

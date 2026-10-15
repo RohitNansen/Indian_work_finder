@@ -16,6 +16,7 @@ from .db import all_rows, connect, one, utcnow, write
 from .evidence import current_evidence, evidence_matches
 from .matching import normalize, words, role_variants, location_matches, recent
 from .company_memory import remember_raw
+from .industries import industry_priority, preferred_queries
 
 DEFAULT_ROLES = [
     "R&D Director", "Research and Development Consultant", "Head of Quality",
@@ -113,8 +114,9 @@ def date_filter(days_recent: int) -> str:
     return "all"
 
 
-def query_queue(roles: list[str], locations: list[str], keywords: list[str] | None = None):
-    queue=deque();seen=set()
+def query_queue(roles: list[str], locations: list[str], keywords: list[str] | None = None,
+                industries: list[str] | None = None):
+    queue=preferred_queries(industries or [],locations);seen={query for query,_,_ in queue}
     # Cover every role before repeating a role with extra skill constraints.
     for round_no in range(max(3,len(locations))):
         for index,role in enumerate(roles):
@@ -236,13 +238,15 @@ def profile_context() -> str:
         "Confirmed additional experience:", *[x["fact"] for x in facts],
         "Answered experience questions (do not infer skills from No, Not sure or Removed):",
         *[f"{x['requirement']}: {x['answer']}" for x in all_rows("SELECT requirement,answer FROM questions WHERE answered_at IS NOT NULL")],
-        "Search preferences:", profile["role_labels"], profile["keywords"], profile["notes"],
+        "Search preferences:", profile["role_labels"], profile["keywords"],
+        "Preferred industries in order:", profile["industry_preferences"], profile["notes"],
     ])
 
 
 def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                work_types: str, count: int, days_recent: int = 30,
-               alert_id: int | None = None, existing_run_id: int | None = None) -> int:
+               alert_id: int | None = None, existing_run_id: int | None = None,
+               industries: str | None = None) -> int:
     import time
     from .direct_links import (resolve_job, find_employer_on_web,
                                discover_employer_vacancies, discover_watched_company_vacancies)
@@ -253,7 +257,11 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     roles_list=labels(roles) or DEFAULT_ROLES
     location_list=labels(locations) or ['Chennai','Tamil Nadu','Bengaluru','Remote India']
     keywords_list=labels(keywords);count=max(1,min(int(count),100))
-    params={'roles':roles_list,'keywords':keywords_list,'locations':location_list,'work_types':labels(work_types),'count':count,'days_recent':days_recent}
+    if industries is None:
+        industries=one('SELECT industry_preferences FROM profile WHERE id=1')['industry_preferences']
+    industry_list=labels(industries)
+    params={'roles':roles_list,'keywords':keywords_list,'industries':industry_list,
+            'locations':location_list,'work_types':labels(work_types),'count':count,'days_recent':days_recent}
     run_id=existing_run_id or write('INSERT INTO search_runs(kind,alert_id,started_at,parameters_json) VALUES(?,?,?,?)',(kind,alert_id,utcnow(),json.dumps(params)))
     write('UPDATE search_runs SET parameters_json=? WHERE id=?',(json.dumps(params),run_id))
     state={'stage':'Starting search','queries':0,'found':0,'checked':0,'matched':0,'current':'','stop_reason':''}
@@ -290,10 +298,11 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         available=[j for jid,j in seen.items() if jid not in processed and jid not in previous_ids
                    and normalized_link(j.get('direct_url')) not in previous_urls]
         available=[j for j in available if not any(term in normalize(j['title']) for term in ('junior','intern','trainee','entry level'))]
-        available.sort(key=lambda j:deterministic_score(j,roles_list,keywords_list,context),reverse=True)
+        available.sort(key=lambda j:(industry_priority(j,industry_list),
+                                     -deterministic_score(j,roles_list,keywords_list,context)))
         verified=[]
         for job in available[:limit]:
-            if state['checked']>=settings.openrouter_max_jobs_per_run or time.monotonic()-started>540:break
+            if state['checked']>=settings.openrouter_max_jobs_per_run or time.monotonic()-started>settings.search_time_limit_seconds:break
             processed.add(job['id']);state['checked']+=1
             progress('Checking company vacancies',job['title']+' · '+job['company'])
             resolved=resolve_job(job,force=job['id'] in previous_ids,run_id=run_id,web_discover=web_lookup)
@@ -308,7 +317,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         progress('Matching verified job descriptions')
         ai={}
         if settings.openrouter_api_key:
-            try:ai=rank_jobs(run_id,context,verified)
+            try:ai=rank_jobs(run_id,context,verified,preferred_industries=industry_list)
             except Exception:pass
         for job in verified:
             evaluation=ai.get(job['id'],{})
@@ -319,16 +328,40 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             if not evaluation and base<35:continue
             score=float(evaluation.get('relevance',base))
             selected.append({'job':job,'score':score,'evaluation':evaluation})
-        selected.sort(key=lambda x:(x['score'],x['job'].get('posted_at') or ''),reverse=True)
+        selected.sort(key=lambda x:(-industry_priority(x['job'],industry_list),
+                                    x['score'],x['job'].get('posted_at') or ''),reverse=True)
         state['matched']=min(count,len(selected));progress('Continuing search')
     try:
-        queue=query_queue(roles_list,location_list,keywords_list)
+        queue=query_queue(roles_list,location_list,keywords_list,industry_list)
+        preferred_request_count=min(6,len(preferred_queries(industry_list,location_list)))
         no_new=0
         progress('Checking employer job boards')
         ingest(discover_ats_vacancies(run_id))
         assess(8)
+        # Naukri and the first JSearch requests discover preferred industries
+        # before general role searches use the vacancy-checking allowance.
+        if settings.apify_token:
+            state['queries']+=1
+            progress('Searching Naukri for preferred industries')
+            ingest(discover_naukri_vacancies(roles_list,location_list,days_recent,run_id,industry_list))
+            assess(8)
+        while queue and calls<min(preferred_request_count,settings.jsearch_max_requests_per_run):
+            if time.monotonic()-started>settings.search_time_limit_seconds:
+                state['stop_reason']='Search time limit reached';break
+            if state['checked']>=settings.openrouter_max_jobs_per_run:
+                state['stop_reason']='Vacancy checking budget reached';break
+            query,remote,cursor=queue.popleft();calls+=1;state['queries']+=1
+            progress('Searching preferred industries',query)
+            try:rows,_=fetch_page(run_id,query,remote,cursor,days_recent)
+            except QuotaExceeded as exc:
+                quota_limited=True;state['stop_reason']=str(exc);break
+            except Exception:
+                failures+=1;continue
+            added=ingest(rows);no_new=0 if added else no_new+1
+            if calls%2==0:assess(10)
+        if not quota_limited and not state['stop_reason']:assess(10)
         for company in watched_company_sites(2):
-            if new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
+            if quota_limited or state['stop_reason'] or new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
             web_calls+=1;state['queries']+=1
             progress('Checking known company career pages',company['name'])
             ingest(discover_watched_company_vacancies(roles_list,location_list,days_recent,company,run_id))
@@ -336,21 +369,14 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         # A small direct-career search complements the aggregator with different sources.
         groups=[roles_list[i:i+2] for i in range(0,len(roles_list),2)]
         for group in groups:
-            if not group or new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
+            if not group or quota_limited or state['stop_reason'] or new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
             web_calls+=1;state['queries']+=1;progress('Searching company career pages',', '.join(group))
             ingest(discover_employer_vacancies(group,location_list,days_recent,run_id,keywords_list))
             if new_matches()>=count:break
-        assess(12)
-        # One small Naukri discovery query on every run. Its portal links are
-        # never presented to the candidate; each lead still needs an exact
-        # employer vacancy and the normal relevance checks below.
-        if settings.apify_token:
-            state['queries']+=1
-            progress('Searching Naukri for relevant roles')
-            ingest(discover_naukri_vacancies(roles_list,location_list,days_recent,run_id))
-            assess(8)
-        while queue and calls<settings.jsearch_max_requests_per_run and new_matches()<count:
-            if time.monotonic()-started>540:state['stop_reason']='Search time limit reached';break
+        if not quota_limited and not state['stop_reason']:assess(12)
+        no_new=0
+        while queue and not quota_limited and not state['stop_reason'] and calls<settings.jsearch_max_requests_per_run and new_matches()<count:
+            if time.monotonic()-started>settings.search_time_limit_seconds:state['stop_reason']='Search time limit reached';break
             if state['checked']>=settings.openrouter_max_jobs_per_run:state['stop_reason']='Vacancy checking budget reached';break
             query,remote,cursor=queue.popleft();calls+=1;state['queries']+=1;progress('Searching related roles',query)
             try:rows,next_cursor=fetch_page(run_id,query,remote,cursor,days_recent)

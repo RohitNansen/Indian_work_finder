@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY CHECK(id=1), name TEXT NOT NULL DEFAULT '',
   role_labels TEXT NOT NULL DEFAULT '', keywords TEXT NOT NULL DEFAULT '',
+  industry_preferences TEXT NOT NULL DEFAULT 'Medical devices, Healthcare technology, Life sciences, Pharmaceuticals, Textile machinery',
   locations TEXT NOT NULL DEFAULT 'Chennai,Tamil Nadu,Bengaluru,Remote India',
   work_types TEXT NOT NULL DEFAULT 'Consulting,Part-time,Contract,Full-time',
   notes TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
@@ -193,6 +194,10 @@ CREATE INDEX IF NOT EXISTS idx_resume_evidence ON resume_evidence(resume_id,sect
 def init_db(path: Path | None = None) -> None:
     with connect(path) as db:
         db.executescript(SCHEMA)
+        profile_columns={row['name'] for row in db.execute('PRAGMA table_info(profile)')}
+        if 'industry_preferences' not in profile_columns:
+            db.execute("ALTER TABLE profile ADD COLUMN industry_preferences TEXT NOT NULL DEFAULT "
+                       "'Medical devices, Healthcare technology, Life sciences, Pharmaceuticals, Textile machinery'")
         company_columns={row['name'] for row in db.execute('PRAGMA table_info(companies)')}
         if 'last_scanned_at' not in company_columns:
             db.execute('ALTER TABLE companies ADD COLUMN last_scanned_at TEXT')

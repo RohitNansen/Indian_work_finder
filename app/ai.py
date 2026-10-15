@@ -134,7 +134,8 @@ RANK_SCHEMA = {
 
 
 def rank_jobs(run_id: int | None, profile: str, jobs: list[dict[str, Any]],
-              model: str | None = None) -> dict[str, dict]:
+              model: str | None = None,
+              preferred_industries: list[str] | None = None) -> dict[str, dict]:
     """Batch candidate jobs; internal relevance never appears in the user UI."""
     ranked: dict[str, dict] = {}
     for start in range(0, len(jobs), 5):
@@ -146,6 +147,12 @@ def rank_jobs(run_id: int | None, profile: str, jobs: list[dict[str, Any]],
                 "Evaluate transferable responsibilities and achievements, not mere keyword overlap. "
                 "Distinguish physical products, electrical/electronic hardware, machinery, quality systems and medical-device work from pure SaaS, sales, software product management or AI software implementation. A generic leadership title alone is not a fit. Assess essential technical domain requirements against demonstrated experience. "
                 "The resume and confirmed answers have priority over unverified claims. "
+                "Honor the listed preferred industries in order. Medical design, medical devices, "
+                "healthcare technology, life sciences and pharmaceuticals form a related group when "
+                "the candidate lists them; textile machinery is another relevant field. Continue "
+                "considering other industries where proven engineering and quality experience transfers. "
+                "Industry preference "
+                "does not make an otherwise unsuitable role relevant. "
                 "Consider seniority, location, employment type and whether the role is plausibly "
                 "open to an experienced retiree. Do not assume age restrictions where unstated. "
                 "For retirement_signal, use 'welcomes_retired' only if the listing explicitly "
@@ -159,7 +166,8 @@ def rank_jobs(run_id: int | None, profile: str, jobs: list[dict[str, Any]],
                 "help this application or support an accurate resume edit. Ask about experience "
                 "rather than implying the person lacks a skill. No invented facts."
             ),
-            content={"profile": public_profile_text(profile), "jobs": [
+            content={"profile": public_profile_text(profile),
+                     "preferred_industries": preferred_industries or [], "jobs": [
                 {"id": j["id"], "title": j["title"], "company": j["company"],
                  "location": j["location"], "work_type": j["work_type"],
                  "description": j["description"][:11000]} for j in batch
