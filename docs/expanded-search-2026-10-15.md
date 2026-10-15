@@ -7,3 +7,5 @@ Each run checks the public Lever and Greenhouse employer feeds, a bounded offici
 The search caps are 90 employer vacancy checks, 16 employer web lookups and 15 minutes per run. The requested number of jobs remains the output cap. JSearch capacity is checked before each run; an exhausted JSearch plan does not prevent employer-site or Naukri searches from finishing. The app's atomic $30 monthly paid-API stop and owner notification remain in force. The admin API use page reports recorded provider spending; JSearch estimates are not an invoice and can include calls covered by the free plan.
 
 The official career-site seed list is in `app/company_memory.py`. These are discovery starting points, not verified job claims. They rotate across runs, and the list of companies from searches grows independently of the seed list.
+
+Hitachi Energy's structured vacancy summary is short. For that employer, verification now requires the full job-description block from its public vacancy page and passes those duties to the matching model. Previously cached checks are refreshed under verification version 4.

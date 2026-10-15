@@ -154,3 +154,21 @@ def test_radiometer_sitemap_rotates_official_vacancy_checks(test_env,monkeypatch
     calls.clear()
     assert len(employer_indexes.discover_radiometer_sitemap_vacancies(30))==2
     assert len(calls)==2
+
+
+def test_hitachi_verification_uses_full_employer_job_duties():
+    url='https://www.hitachienergy.com/us/en/careers/open-jobs/details/JID3-123'
+    posting={'@type':'JobPosting','title':'R&D Project Manager',
+             'hiringOrganization':{'name':'Hitachi Energy'},
+             'jobLocation':{'address':{'addressLocality':'Chennai','addressCountry':'IN'}},
+             'description':'Apply today for a role in our engineering department. '*4}
+    duties='Lead cross-functional engineering projects in power conversion. '*15
+    html=('<h1>R&D Project Manager</h1><div class="cmp-job-details__description-block">'
+          +duties+'</div><script type="application/ld+json">'+json.dumps(posting)+'</script>')
+    job={'title':'R&D Project Manager','company':'Hitachi Energy','location':'Chennai',
+         'company_url':'https://www.hitachienergy.com'}
+    valid,_,detail=vacancy_details(url,html,job)
+    assert valid
+    assert duties[:50] in detail['description']
+    assert 'Apply today' not in detail['description']
+    assert not vacancy_details(url,html.replace('cmp-job-details__description-block','absent'),job)[0]

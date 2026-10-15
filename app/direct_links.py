@@ -134,6 +134,11 @@ def vacancy_details(url,html,job):
     org=posting.get('hiringOrganization') or {}
     company=org.get('name','') if isinstance(org,dict) else str(org)
     description=BeautifulSoup(str(posting.get('description','')),'html.parser').get_text('\n',strip=True)
+    if under(host(url),{'hitachienergy.com'}):
+        body=soup.select_one('.cmp-job-details__description-block')
+        full_text=body.get_text('\n',strip=True) if body else ''
+        if len(full_text)<500:return False,'Employer full job responsibilities are missing',{}
+        description=full_text
     parent=parent_employer_match(url,job['company'],company,description)
     if not parent and not employer_host(url,job,org):return False,'Employer domain or ATS ownership is unconfirmed',{}
     if company and not parent and not (tokens(company)&tokens(job['company'])):return False,'Hiring company differs',{}
@@ -239,7 +244,7 @@ def candidate_urls(raw):
 
 def resolve_job(job,force=False,discover=None,run_id=None,web_discover=None):
     from .company_memory import remember_verified_vacancy, verified_company
-    if not force and job.get('verification_version') == 3 and job.get('direct_checked_at'):
+    if not force and job.get('verification_version') == 4 and job.get('direct_checked_at'):
         try:
             recent=datetime.fromisoformat(job['direct_checked_at'])>datetime.now(timezone.utc)-timedelta(hours=12)
             if recent:
@@ -303,10 +308,10 @@ def resolve_job(job,force=False,discover=None,run_id=None,web_discover=None):
         queue.append(job['company_url']);inspect_queue(15)
     if found:
         remember_verified_vacancy(job['company'],found,job.get('company_url'))
-        write('UPDATE jobs SET title=?,description=?,location=?,posted_at=?,work_type=?,verified_json=?,verification_version=3 WHERE id=?',
+        write('UPDATE jobs SET title=?,description=?,location=?,posted_at=?,work_type=?,verified_json=?,verification_version=4 WHERE id=?',
               (evidence['title'],evidence['description'],evidence['location'],evidence['posted_at'],evidence['work_type'],json.dumps(evidence),job['id']))
         job.update({k:evidence[k] for k in ('title','description','location','posted_at','work_type')})
-        job['verified_json']=json.dumps(evidence);job['verification_version']=3
+        job['verified_json']=json.dumps(evidence);job['verification_version']=4
     status='verified' if found else 'unverified'
     checked=utcnow()
     write('UPDATE jobs SET direct_url=?,direct_status=?,direct_checked_at=?,direct_note=? WHERE id=?',
