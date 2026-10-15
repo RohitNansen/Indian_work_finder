@@ -7,6 +7,37 @@ from urllib.parse import urlparse
 
 from .db import connect, one, utcnow
 
+# Official employer career entry points. They are discovery hints only: an
+# individual vacancy still needs independent employer-page verification.
+MEDICAL_CAREER_SEEDS = (
+    ('Baxter', 'https://jobs.baxter.com/en/'),
+    ('Healthium Medtech', 'https://www.healthiummedtech.com/careers/'),
+    ('BPL Medical Technologies', 'https://www.bplmedicaltechnologies.com/careers/'),
+    ('InnAccel Technologies', 'https://innaccel.com/careers/'),
+    ('Panacea Medical Technologies', 'https://www.panaceamedical.in/careers/jobs/'),
+    ('Niramai Health Analytix', 'https://niramai.com/careers/'),
+    ('Blueneem', 'https://blueneem.com/careers/'),
+    ('Capla India', 'https://caplagroup.com/careers'),
+    ('Bigtec Labs', 'https://bigteclabs.com/careers/'),
+)
+
+
+def seed_career_sites() -> None:
+    """Persist a small medical-employer starting set without marking it verified."""
+    now=utcnow()
+    with connect() as db:
+        for name,url in MEDICAL_CAREER_SEEDS:
+            key=name_key(name)
+            db.execute('INSERT INTO companies(name_key,name,website_hint,first_seen_at,last_seen_at) '
+                       'VALUES(?,?,?,?,?) ON CONFLICT(name_key) DO UPDATE SET '
+                       'website_hint=COALESCE(companies.website_hint,excluded.website_hint)',
+                       (key,name,url,now,now))
+            company_id=db.execute('SELECT id FROM companies WHERE name_key=?',(key,)).fetchone()[0]
+            db.execute('INSERT OR IGNORE INTO company_observations('
+                       'company_id,source,source_job_key,observed_name,website_hint,first_seen_at,last_seen_at) '
+                       'VALUES(?,?,?,?,?,?,?)',
+                       (company_id,'Official career page seed',url,name,url,now,now))
+
 
 def name_key(name: str) -> str:
     value = re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
@@ -144,6 +175,36 @@ def watched_company_sites(limit: int = 2) -> list[dict]:
             hosts.add(hostname)
         if len(result) >= limit:
             break
+    return result
+
+
+def candidate_company_sites(limit: int = 4) -> list[dict]:
+    """Rotate unverified company hints; these never become trusted apply links."""
+    from .direct_links import BOARDS, ATS, under
+    from .industries import industry_priority
+    with connect() as db:
+        rows=db.execute(
+            'SELECT id,name,website_hint,last_scanned_at FROM companies '
+            'WHERE verified_at IS NULL AND website_hint IS NOT NULL '
+            'ORDER BY last_scanned_at IS NOT NULL,last_scanned_at,last_seen_at DESC'
+        ).fetchall()
+    priority={name_key(name):index for index,(name,_) in enumerate(MEDICAL_CAREER_SEEDS)}
+    ranked=[]
+    for row in rows:
+        domain=urlparse(row['website_hint']).hostname or ''
+        if not domain or under(domain,BOARDS | ATS):continue
+        tier=0 if name_key(row['name']) in priority or industry_priority(
+            {'title':'','company':row['name'],'description':''},['Medical devices','Textile machinery'])==0 else 1
+        ranked.append((tier,row['last_scanned_at'] is not None,row['last_scanned_at'] or '',
+                       priority.get(name_key(row['name']),999),-row['id'],dict(row)))
+    ranked.sort(key=lambda entry:entry[:5])
+    result=[];hosts=set()
+    for *_,company in ranked:
+        domain=urlparse(company['website_hint']).hostname.lower().removeprefix('www.')
+        if domain in hosts:continue
+        company['verified']=False
+        result.append(company);hosts.add(domain)
+        if len(result)>=limit:break
     return result
 
 

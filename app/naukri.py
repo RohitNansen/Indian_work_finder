@@ -13,6 +13,7 @@ from .company_memory import remember_company, remember_source_lead
 from .config import settings
 from .db import utcnow, write
 from .industries import families
+from .matching import search_places
 
 ACTOR = 'blackfalcondata~naukri-jobs-feed'
 MAX_RESULTS = 25
@@ -49,7 +50,7 @@ def query_choice(roles: list[str], locations: list[str], run_id: int,
                  industries: list[str] | None = None) -> tuple[str, str]:
     roles = roles or ['R&D Director']
     cities = []
-    for location in locations:
+    for location in search_places(locations):
         lower = location.lower()
         if 'remote' in lower:
             continue
@@ -121,10 +122,11 @@ def to_raw(row: dict) -> dict | None:
 
 def discover_naukri_vacancies(roles: list[str], locations: list[str], days: int,
                               run_id: int | None,
-                              industries: list[str] | None = None) -> list[dict]:
+                              industries: list[str] | None = None,
+                              variant: int = 0) -> list[dict]:
     if not settings.apify_token:
         return []
-    keyword, location = query_choice(roles,locations,run_id or 1,industries)
+    keyword, location = query_choice(roles,locations,(run_id or 1)+variant,industries)
     payload = {'keyword':keyword,'location':location,'datePosted':str(min(days,30)),
                'experience':'10+',
                'maxResults':MAX_RESULTS,'fetchDetails':True,'descriptionFormat':'text',

@@ -39,10 +39,10 @@ class Settings:
     quota_alert_email: str = os.getenv("QUOTA_ALERT_EMAIL", "")
     resend_daily_quota: int = int(os.getenv("RESEND_DAILY_QUOTA", "100"))
     resend_monthly_quota: int = int(os.getenv("RESEND_MONTHLY_QUOTA", "3000"))
-    jsearch_max_requests_per_run: int = int(os.getenv("JSEARCH_MAX_REQUESTS_PER_RUN", "28"))
-    openrouter_max_jobs_per_run: int = int(os.getenv("OPENROUTER_MAX_JOBS_PER_RUN", "60"))
-    employer_web_lookups_per_run: int = int(os.getenv("EMPLOYER_WEB_LOOKUPS_PER_RUN", "8"))
-    search_time_limit_seconds: int = int(os.getenv("SEARCH_TIME_LIMIT_SECONDS", "720"))
+    jsearch_max_requests_per_run: int = int(os.getenv("JSEARCH_MAX_REQUESTS_PER_RUN", "36"))
+    openrouter_max_jobs_per_run: int = int(os.getenv("OPENROUTER_MAX_JOBS_PER_RUN", "90"))
+    employer_web_lookups_per_run: int = int(os.getenv("EMPLOYER_WEB_LOOKUPS_PER_RUN", "16"))
+    search_time_limit_seconds: int = int(os.getenv("SEARCH_TIME_LIMIT_SECONDS", "900"))
     monthly_spend_limit_usd: float = float(os.getenv("MONTHLY_SPEND_LIMIT_USD", "30"))
 
 

@@ -15,6 +15,7 @@ SYNONYMS={'plc':'programmable logic controller','scada':'supervisory control dat
  'electricals':'electrical','electronics':'electronic','robotics':'robotic',
  'bangalore':'bengaluru','madras':'chennai','kovai':'coimbatore','tn':'tamil nadu'}
 GENERIC={'head','director','manager','senior','lead','leader','chief','of','and','the','for','in','job','jobs','team','management','india','engineering','engineer'}
+SOUTHERN_PLACES=('Hyderabad','Kochi','Coimbatore','Mysuru','Visakhapatnam')
 
 def normalize(value):
     value=re.sub(r'r\s*&\s*d\b','research development',str(value).lower())
@@ -41,10 +42,23 @@ def role_variants(role):
         result.extend(['Research and Development Manager','R&D Head','Research and Development Director'])
     return list(dict.fromkeys(result))
 
+def search_places(requested):
+    """Turn the editable South India preference into specific discovery queries."""
+    places=[]
+    for place in requested:
+        if normalize(place)=='south india':places.extend(SOUTHERN_PLACES)
+        else:places.append(place)
+    return list(dict.fromkeys(places))
+
 def location_matches(actual,requested,remote=False):
     actual=normalize(actual); actual_words=set(actual.split())
     for place in requested:
         p=normalize(place); pw=set(p.split())
+        if p=='south india':
+            if any(normalize(city) in actual for city in SOUTHERN_PLACES+('Chennai','Bengaluru','Madurai','Mangaluru','Tiruchirappalli','Thiruvananthapuram')) or any(
+                state in actual for state in ('tamil nadu','karnataka','telangana','kerala','andhra pradesh','puducherry')):
+                return True
+            continue
         if 'remote' in pw:
             if remote and ('india' in actual_words or 'worldwide' in actual_words):return True
             continue

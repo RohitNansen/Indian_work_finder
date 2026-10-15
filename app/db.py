@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY CHECK(id=1), name TEXT NOT NULL DEFAULT '',
   role_labels TEXT NOT NULL DEFAULT '', keywords TEXT NOT NULL DEFAULT '',
   industry_preferences TEXT NOT NULL DEFAULT 'Medical devices, Healthcare technology, Life sciences, Pharmaceuticals, Textile machinery',
-  locations TEXT NOT NULL DEFAULT 'Chennai,Tamil Nadu,Bengaluru,Remote India',
+  locations TEXT NOT NULL DEFAULT 'Chennai,Tamil Nadu,Bengaluru,South India,Remote India',
   work_types TEXT NOT NULL DEFAULT 'Consulting,Part-time,Contract,Full-time',
   notes TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
 );
@@ -240,6 +240,10 @@ def init_db(path: Path | None = None) -> None:
                 db.execute("UPDATE jobs SET logo_url=? WHERE id=?",(logo,row['id']))
             except (ValueError,TypeError):pass
         db.execute("INSERT OR IGNORE INTO profile(id,updated_at) VALUES(1,?)", (utcnow(),))
+        # Expand the original, untouched location choice when this client opts
+        # into the rest of South India. Individually edited choices stay intact.
+        db.execute("UPDATE profile SET locations='Chennai,Tamil Nadu,Bengaluru,South India,Remote India' "
+                   "WHERE replace(locations,' ','')='Chennai,TamilNadu,Bengaluru,RemoteIndia'")
 
 
 def one(sql: str, args: tuple = ()):

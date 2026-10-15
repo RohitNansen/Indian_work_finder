@@ -14,7 +14,7 @@ from .budget import BudgetExceeded, reserve_call
 from .config import settings
 from .db import all_rows, connect, one, utcnow, write
 from .evidence import current_evidence, evidence_matches
-from .matching import normalize, words, role_variants, location_matches, recent
+from .matching import normalize, words, role_variants, location_matches, recent, search_places
 from .company_memory import remember_raw
 from .industries import industry_priority, preferred_queries
 
@@ -116,6 +116,7 @@ def date_filter(days_recent: int) -> str:
 
 def query_queue(roles: list[str], locations: list[str], keywords: list[str] | None = None,
                 industries: list[str] | None = None):
+    locations=search_places(locations)
     queue=preferred_queries(industries or [],locations);seen={query for query,_,_ in queue}
     # Cover every role before repeating a role with extra skill constraints.
     for round_no in range(max(3,len(locations))):
@@ -251,7 +252,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     from .direct_links import (resolve_job, find_employer_on_web,
                                discover_employer_vacancies, discover_watched_company_vacancies)
     from .ats_feeds import discover_ats_vacancies
-    from .company_memory import watched_company_sites
+    from .company_memory import watched_company_sites, candidate_company_sites, seed_career_sites
     from .naukri import discover_naukri_vacancies
     if not settings.jsearch_api_key:raise RuntimeError("JSearch is not configured yet")
     roles_list=labels(roles) or DEFAULT_ROLES
@@ -278,7 +279,9 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         return len(selected)
     def web_lookup(job):
         nonlocal web_calls
-        if web_calls>=settings.employer_web_lookups_per_run:return []
+        # Reserve most employer searches for rotating career sites, rather
+        # than spending the whole allowance resolving weak aggregator leads.
+        if web_calls>=max(0,settings.employer_web_lookups_per_run-9):return []
         web_calls+=1;state['queries']+=1
         return find_employer_on_web(job,run_id)
     def ingest(rows):
@@ -332,12 +335,29 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                                     x['score'],x['job'].get('posted_at') or ''),reverse=True)
         state['matched']=min(count,len(selected));progress('Continuing search')
     try:
+        seed_career_sites()
         queue=query_queue(roles_list,location_list,keywords_list,industry_list)
         preferred_request_count=min(6,len(preferred_queries(industry_list,location_list)))
         no_new=0
         progress('Checking employer job boards')
         ingest(discover_ats_vacancies(run_id))
-        assess(8)
+        assess(6)
+        # Revisit saved employers before aggregators consume the vacancy-check
+        # allowance. Candidate sites are only hints; every job still passes
+        # the same individual employer-vacancy verification.
+        for company in candidate_company_sites(4)+watched_company_sites(3):
+            if new_matches()>=count or time.monotonic()-started>settings.search_time_limit_seconds or web_calls>=settings.employer_web_lookups_per_run-2:break
+            web_calls+=1;state['queries']+=1
+            progress('Checking saved company career pages',company['name'])
+            ingest(discover_watched_company_vacancies(roles_list,location_list,days_recent,company,run_id))
+            assess(6)
+        if new_matches()<count and web_calls<settings.employer_web_lookups_per_run-1:
+            web_calls+=1;state['queries']+=1
+            progress('Searching medical employer vacancies')
+            ingest(discover_employer_vacancies(
+                ['medical device R&D manager','medical hardware quality lead'],
+                location_list,days_recent,run_id,keywords_list))
+            assess(8)
         # Naukri and the first JSearch requests discover preferred industries
         # before general role searches use the vacancy-checking allowance.
         if settings.apify_token:
@@ -345,6 +365,11 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             progress('Searching Naukri for preferred industries')
             ingest(discover_naukri_vacancies(roles_list,location_list,days_recent,run_id,industry_list))
             assess(8)
+            if new_matches()<count and time.monotonic()-started<settings.search_time_limit_seconds:
+                state['queries']+=1
+                progress('Searching Naukri for transferable roles')
+                ingest(discover_naukri_vacancies(roles_list,location_list,days_recent,run_id,[],variant=1))
+                assess(6)
         while queue and calls<min(preferred_request_count,settings.jsearch_max_requests_per_run):
             if time.monotonic()-started>settings.search_time_limit_seconds:
                 state['stop_reason']='Search time limit reached';break
@@ -360,12 +385,6 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             added=ingest(rows);no_new=0 if added else no_new+1
             if calls%2==0:assess(10)
         if not quota_limited and not state['stop_reason']:assess(10)
-        for company in watched_company_sites(2):
-            if quota_limited or state['stop_reason'] or new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2):break
-            web_calls+=1;state['queries']+=1
-            progress('Checking known company career pages',company['name'])
-            ingest(discover_watched_company_vacancies(roles_list,location_list,days_recent,company,run_id))
-            assess(5)
         # A small direct-career search complements the aggregator with different sources.
         groups=[roles_list[i:i+2] for i in range(0,len(roles_list),2)]
         for group in groups:
@@ -386,7 +405,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             progress('Reviewing newly found roles',query)
             if calls%3==0:assess(8)
             if next_cursor and added and calls>=len(roles_list):queue.append((query,remote,next_cursor))
-            if no_new>=4 and calls>=len(roles_list):state['stop_reason']='Several searches found no new suitable vacancies';break
+            if no_new>=8 and calls>=max(12,len(roles_list)):state['stop_reason']='Several searches found no new suitable vacancies';break
         if quota_limited and not seen:raise RuntimeError(state['stop_reason']+' before any listings could be retrieved')
         if len(selected)<count:assess(settings.openrouter_max_jobs_per_run-state['checked'])
         if not state['stop_reason']:
