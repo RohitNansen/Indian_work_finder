@@ -138,9 +138,10 @@ def rank_jobs(run_id: int | None, profile: str, jobs: list[dict[str, Any]],
               preferred_industries: list[str] | None = None) -> dict[str, dict]:
     """Batch candidate jobs; internal relevance never appears in the user UI."""
     ranked: dict[str, dict] = {}
-    for start in range(0, len(jobs), 5):
-        batch = jobs[start:start + 5]
-        data = ask_json(
+    for start in range(0, len(jobs), 3):
+        batch = jobs[start:start + 3]
+        try:
+            data = ask_json(
             run_id=run_id, operation="rank_jobs",
             instructions=(
                 "You are curating jobs for a senior professional with 30+ years of experience. "
@@ -170,9 +171,16 @@ def rank_jobs(run_id: int | None, profile: str, jobs: list[dict[str, Any]],
                      "preferred_industries": preferred_industries or [], "jobs": [
                 {"id": j["id"], "title": j["title"], "company": j["company"],
                  "location": j["location"], "work_type": j["work_type"],
-                 "description": j["description"][:11000]} for j in batch
+                 "description": j["description"][:7000]} for j in batch
             ]}, schema=RANK_SCHEMA, model=model,
-        )
+            )
+        except json.JSONDecodeError:
+            # Some providers return truncated JSON near their output limit.
+            # Retry individually without discarding earlier successful batches.
+            if len(batch) > 1:
+                for job in batch:
+                    ranked.update(rank_jobs(run_id,profile,[job],model,preferred_industries))
+            continue
         for item in data.get("jobs", []):
             if item.get("id") in {j["id"] for j in batch}:
                 ranked[item["id"]] = item

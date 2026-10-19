@@ -115,3 +115,27 @@ def test_bd_legal_employer_name_is_accepted_only_on_bd_vacancy(test_env, monkeyp
                                                'BD', 'https://jobs.bd.com/en/', 30)
     assert good and good['job_title'] == 'Lead Design Engineer'
     assert bad is None
+    valid, note, _ = direct_links.vacancy_details(
+        'https://jobs.bd.com/en/job/bengaluru/123', html,
+        {'title': 'Lead Design Engineer', 'company': 'BD',
+         'location': 'Bengaluru, Karnataka, India',
+         'company_url': 'https://jobs.bd.com/en/'})
+    assert valid, note
+
+
+def test_truncated_rank_batch_retries_jobs_individually(test_env, monkeypatch):
+    from app import ai
+    jobs = [dict(id=str(i), title='Head of Quality', company='Medical Lab',
+                 location='Chennai', work_type='Full-time', description='Medical product quality')
+            for i in range(3)]
+    sizes = []
+    def fake_ask(**kwargs):
+        batch = kwargs['content']['jobs']
+        sizes.append(len(batch))
+        if len(batch) > 1:
+            raise json.JSONDecodeError('truncated', '{', 0)
+        return {'jobs': [{'id': batch[0]['id'], 'relevance': 75}]}
+    monkeypatch.setattr(ai, 'ask_json', fake_ask)
+    ranked = ai.rank_jobs(None, 'Experienced quality leader', jobs)
+    assert sizes == [3, 1, 1, 1]
+    assert set(ranked) == {'0', '1', '2'}

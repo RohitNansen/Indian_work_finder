@@ -38,6 +38,13 @@ def tokens(text):
     return set(re.findall(r'[a-z0-9]{3,}', text.lower())) - GENERIC
 
 
+def employer_name_matches(expected, actual, url):
+    if tokens(expected) & tokens(actual):
+        return True
+    return (expected.strip().lower() == 'bd' and host(url) == 'jobs.bd.com' and
+            {'becton', 'dickinson'} <= tokens(actual))
+
+
 def public_url(url):
     p = urlparse(url)
     if p.scheme != 'https' or p.username or p.password or not p.hostname or p.port not in (None,443):
@@ -141,7 +148,7 @@ def vacancy_details(url,html,job):
         description=full_text
     parent=parent_employer_match(url,job['company'],company,description)
     if not parent and not employer_host(url,job,org):return False,'Employer domain or ATS ownership is unconfirmed',{}
-    if company and not parent and not (tokens(company)&tokens(job['company'])):return False,'Hiring company differs',{}
+    if company and not parent and not employer_name_matches(job['company'],company,url):return False,'Hiring company differs',{}
     expiry=posting.get('validThrough')
     if expiry:
         try:
@@ -388,10 +395,7 @@ def cited_employer_vacancy(url, company, website, days, run_id=None):
         org_name=org.get('name','') if isinstance(org,dict) else str(org)
         description=BeautifulSoup(str(item.get('description') or ''),'html.parser').get_text('\n',strip=True)
         parent=parent_employer_match(final,company,org_name,description)
-        bd_legal_name=(company.strip().lower()=='bd' and
-                       {'becton','dickinson'} <= tokens(org_name) and
-                       host(final)=='jobs.bd.com')
-        if org_name and not parent and not bd_legal_name and not tokens(org_name)&tokens(company):
+        if org_name and not parent and not employer_name_matches(company,org_name,final):
             raise ValueError('Posting belongs to another employer')
         if not parent and not employer_host(final,{'company':company,'company_url':website},org_name):
             raise ValueError('Employer ownership unconfirmed')
