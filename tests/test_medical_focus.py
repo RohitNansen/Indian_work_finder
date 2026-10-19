@@ -20,9 +20,20 @@ def test_directory_is_large_unique_and_rotates(test_env):
     assert {x['name'] for x in first} & {x['name'] for x in second} == {'BD'}
 
 
+def test_medical_focus_starts_on_but_can_be_switched_off(tmp_path):
+    path = tmp_path / 'focus.sqlite3'
+    db.init_db(path)
+    with db.connect(path) as conn:
+        assert conn.execute('SELECT focus_medical FROM profile WHERE id=1').fetchone()[0] == 1
+        conn.execute('UPDATE profile SET focus_medical=0 WHERE id=1')
+    db.init_db(path)
+    with db.connect(path) as conn:
+        assert conn.execute('SELECT focus_medical FROM profile WHERE id=1').fetchone()[0] == 0
+
+
 def test_free_crawler_emits_only_verified_same_host_vacancies(test_env, monkeypatch):
     seed_career_sites()
-    company = next(x for x in medical_company_sites(100) if x['name'] == 'Baxter')
+    company = next(x for x in medical_company_sites(len(MEDICAL_COMPANIES)) if x['name'] == 'Baxter')
     html = '<a href="/en/job/123">Head of Quality</a><a href="https://naukri.com/job/3">Head of Quality</a>'
     monkeypatch.setattr(medical_crawl, 'read_page', lambda url: ('https://jobs.baxter.com/en/', html))
     checked = []

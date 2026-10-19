@@ -55,7 +55,7 @@ def medical_company_sites(limit: int = 24) -> list[dict]:
             "WHERE c.name_key!='bd' AND c.website_hint IS NOT NULL AND EXISTS "
             "(SELECT 1 FROM company_observations o WHERE o.company_id=c.id "
             "AND o.source='Medical career directory') "
-            "ORDER BY c.last_scanned_at IS NOT NULL,c.last_scanned_at,c.id LIMIT ?",
+            "ORDER BY c.last_scanned_at IS NOT NULL,c.last_scanned_at,c.id DESC LIMIT ?",
             (max(0,limit-int(pinned is not None)),),
         ).fetchall()
     return ([dict(pinned)] if pinned and limit else []) + [dict(row) for row in rows]

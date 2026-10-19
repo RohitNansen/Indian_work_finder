@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY CHECK(id=1), name TEXT NOT NULL DEFAULT '',
   role_labels TEXT NOT NULL DEFAULT '', keywords TEXT NOT NULL DEFAULT '',
   industry_preferences TEXT NOT NULL DEFAULT 'Medical devices, Healthcare technology, Life sciences, Pharmaceuticals, Textile machinery',
-  focus_medical INTEGER NOT NULL DEFAULT 0,
+  focus_medical INTEGER NOT NULL DEFAULT 1,
   locations TEXT NOT NULL DEFAULT 'Chennai,Tamil Nadu,Bengaluru,South India,Remote India',
   work_types TEXT NOT NULL DEFAULT 'Consulting,Part-time,Contract,Full-time',
   notes TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
@@ -200,7 +200,7 @@ def init_db(path: Path | None = None) -> None:
             db.execute("ALTER TABLE profile ADD COLUMN industry_preferences TEXT NOT NULL DEFAULT "
                        "'Medical devices, Healthcare technology, Life sciences, Pharmaceuticals, Textile machinery'")
         if 'focus_medical' not in profile_columns:
-            db.execute('ALTER TABLE profile ADD COLUMN focus_medical INTEGER NOT NULL DEFAULT 0')
+            db.execute('ALTER TABLE profile ADD COLUMN focus_medical INTEGER NOT NULL DEFAULT 1')
         company_columns={row['name'] for row in db.execute('PRAGMA table_info(companies)')}
         if 'last_scanned_at' not in company_columns:
             db.execute('ALTER TABLE companies ADD COLUMN last_scanned_at TEXT')
@@ -243,6 +243,11 @@ def init_db(path: Path | None = None) -> None:
                 db.execute("UPDATE jobs SET logo_url=? WHERE id=?",(logo,row['id']))
             except (ValueError,TypeError):pass
         db.execute("INSERT OR IGNORE INTO profile(id,updated_at) VALUES(1,?)", (utcnow(),))
+        # Set the requested initial preference once. Later changes made in the
+        # search form, including turning the focus off, remain the user's choice.
+        if db.execute('PRAGMA user_version').fetchone()[0] < 1:
+            db.execute('UPDATE profile SET focus_medical=1 WHERE id=1')
+            db.execute('PRAGMA user_version=1')
         # Expand the original, untouched location choice when this client opts
         # into the rest of South India. Individually edited choices stay intact.
         db.execute("UPDATE profile SET locations='Chennai,Tamil Nadu,Bengaluru,South India,Remote India' "
