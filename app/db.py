@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY CHECK(id=1), name TEXT NOT NULL DEFAULT '',
   role_labels TEXT NOT NULL DEFAULT '', keywords TEXT NOT NULL DEFAULT '',
   industry_preferences TEXT NOT NULL DEFAULT 'Medical devices, Healthcare technology, Life sciences, Pharmaceuticals, Textile machinery',
+  focus_medical INTEGER NOT NULL DEFAULT 0,
   locations TEXT NOT NULL DEFAULT 'Chennai,Tamil Nadu,Bengaluru,South India,Remote India',
   work_types TEXT NOT NULL DEFAULT 'Consulting,Part-time,Contract,Full-time',
   notes TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
@@ -198,6 +199,8 @@ def init_db(path: Path | None = None) -> None:
         if 'industry_preferences' not in profile_columns:
             db.execute("ALTER TABLE profile ADD COLUMN industry_preferences TEXT NOT NULL DEFAULT "
                        "'Medical devices, Healthcare technology, Life sciences, Pharmaceuticals, Textile machinery'")
+        if 'focus_medical' not in profile_columns:
+            db.execute('ALTER TABLE profile ADD COLUMN focus_medical INTEGER NOT NULL DEFAULT 0')
         company_columns={row['name'] for row in db.execute('PRAGMA table_info(companies)')}
         if 'last_scanned_at' not in company_columns:
             db.execute('ALTER TABLE companies ADD COLUMN last_scanned_at TEXT')
@@ -228,7 +231,7 @@ def init_db(path: Path | None = None) -> None:
             if column not in job_columns:
                 db.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
         db.execute("UPDATE jobs SET direct_status='pending',direct_url=NULL,direct_checked_at=NULL WHERE verification_version<3 AND direct_status='verified'")
-        db.execute("UPDATE search_runs SET shortlisted_count=(SELECT COUNT(*) FROM search_results r JOIN jobs j ON j.id=r.job_id WHERE r.run_id=search_runs.id AND j.direct_status='verified' AND j.verification_version=3) WHERE status!='running'")
+        db.execute("UPDATE search_runs SET shortlisted_count=(SELECT COUNT(*) FROM search_results r JOIN jobs j ON j.id=r.job_id WHERE r.run_id=search_runs.id AND j.direct_status='verified' AND j.verification_version>=3) WHERE status!='running'")
         run_columns={row['name'] for row in db.execute('PRAGMA table_info(search_runs)')}
         if 'progress_json' not in run_columns:
             db.execute("ALTER TABLE search_runs ADD COLUMN progress_json TEXT NOT NULL DEFAULT '{}'")

@@ -284,12 +284,14 @@ def profile_context() -> str:
 def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                work_types: str, count: int, days_recent: int = 30,
                alert_id: int | None = None, existing_run_id: int | None = None,
-               industries: str | None = None) -> int:
+               industries: str | None = None, focus_medical: bool = False) -> int:
     import time
     from .direct_links import (resolve_job, find_employer_on_web,
                                discover_employer_vacancies, discover_watched_company_vacancies)
     from .ats_feeds import discover_ats_vacancies
-    from .company_memory import watched_company_sites, candidate_company_sites, seed_career_sites
+    from .company_memory import (watched_company_sites, candidate_company_sites,
+                                 medical_company_sites, seed_career_sites)
+    from .medical_crawl import crawl_medical_companies
     from .naukri import discover_naukri_vacancies
     from .employer_indexes import (discover_baxter_vacancies,
                                    discover_radiometer_sitemap_vacancies)
@@ -300,8 +302,12 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
     if industries is None:
         industries=one('SELECT industry_preferences FROM profile WHERE id=1')['industry_preferences']
     industry_list=labels(industries)
+    if focus_medical:
+        industry_list=list(dict.fromkeys(['Medical devices','Healthcare technology',
+                                          'Life sciences','Pharmaceuticals']+industry_list))
     params={'roles':roles_list,'keywords':keywords_list,'industries':industry_list,
-            'locations':location_list,'work_types':labels(work_types),'count':count,'days_recent':days_recent}
+            'locations':location_list,'work_types':labels(work_types),'count':count,
+            'days_recent':days_recent,'focus_medical':focus_medical}
     run_id=existing_run_id or write('INSERT INTO search_runs(kind,alert_id,started_at,parameters_json) VALUES(?,?,?,?)',(kind,alert_id,utcnow(),json.dumps(params)))
     write('UPDATE search_runs SET parameters_json=? WHERE id=?',(json.dumps(params),run_id))
     state={'stage':'Starting search','queries':0,'found':0,'checked':0,'matched':0,'current':'','stop_reason':''}
@@ -383,6 +389,15 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             state['stop_reason']='JSearch monthly request quota reached; checking other sources'
         preferred_request_count=min(6,len(preferred_queries(industry_list,location_list)))
         no_new=0
+        scanned_medical_ids=set()
+        if focus_medical:
+            medical_sites=medical_company_sites(12)
+            scanned_medical_ids={company['id'] for company in medical_sites}
+            progress('Checking medical company career pages')
+            ingest(crawl_medical_companies(
+                medical_sites,days_recent,run_id,
+                progress=lambda label:progress('Checking medical company career pages',label)))
+            assess(14)
         progress('Checking employer job boards')
         ingest(discover_ats_vacancies(run_id))
         assess(6)
@@ -398,6 +413,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         # allowance. Candidate sites are only hints; every job still passes
         # the same individual employer-vacancy verification.
         for company in candidate_company_sites(4)+watched_company_sites(3):
+            if company['id'] in scanned_medical_ids:continue
             if new_matches()>=count or time.monotonic()-started>settings.search_time_limit_seconds or web_calls>=settings.employer_web_lookups_per_run-2:break
             web_calls+=1;state['queries']+=1
             progress('Checking saved company career pages',company['name'])

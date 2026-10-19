@@ -6,6 +6,7 @@ import json
 from urllib.parse import urlparse
 
 from .db import connect, one, utcnow
+from .medical_directory import MEDICAL_COMPANIES
 
 # Official employer career entry points. They are discovery hints only: an
 # individual vacancy still needs independent employer-page verification.
@@ -24,20 +25,34 @@ MEDICAL_CAREER_SEEDS = (
 
 
 def seed_career_sites() -> None:
-    """Persist a small medical-employer starting set without marking it verified."""
+    """Persist official medical career entry points without marking jobs verified."""
     now=utcnow()
     with connect() as db:
-        for name,url in MEDICAL_CAREER_SEEDS:
+        for name,url,_field in MEDICAL_COMPANIES:
             key=name_key(name)
             db.execute('INSERT INTO companies(name_key,name,website_hint,first_seen_at,last_seen_at) '
                        'VALUES(?,?,?,?,?) ON CONFLICT(name_key) DO UPDATE SET '
-                       'website_hint=COALESCE(companies.website_hint,excluded.website_hint)',
+                       'website_hint=excluded.website_hint',
                        (key,name,url,now,now))
             company_id=db.execute('SELECT id FROM companies WHERE name_key=?',(key,)).fetchone()[0]
             db.execute('INSERT OR IGNORE INTO company_observations('
                        'company_id,source,source_job_key,observed_name,website_hint,first_seen_at,last_seen_at) '
                        'VALUES(?,?,?,?,?,?,?)',
-                       (company_id,'Official career page seed',url,name,url,now,now))
+                       (company_id,'Medical career directory',url,name,url,now,now))
+
+
+def medical_company_sites(limit: int = 12) -> list[dict]:
+    """Rotate directory entries, including sites that yielded no jobs last time."""
+    with connect() as db:
+        rows = db.execute(
+            "SELECT c.id,c.name,c.website_hint,c.last_scanned_at FROM companies c "
+            "WHERE c.website_hint IS NOT NULL AND EXISTS "
+            "(SELECT 1 FROM company_observations o WHERE o.company_id=c.id "
+            "AND o.source='Medical career directory') "
+            "ORDER BY c.last_scanned_at IS NOT NULL,c.last_scanned_at,c.id LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def name_key(name: str) -> str:
@@ -189,7 +204,7 @@ def candidate_company_sites(limit: int = 4) -> list[dict]:
             'WHERE verified_at IS NULL AND website_hint IS NOT NULL '
             'ORDER BY last_scanned_at IS NOT NULL,last_scanned_at,last_seen_at DESC'
         ).fetchall()
-    priority={name_key(name):index for index,(name,_) in enumerate(MEDICAL_CAREER_SEEDS)}
+    priority={name_key(name):index for index,(name,_,_) in enumerate(MEDICAL_COMPANIES)}
     ranked=[]
     for row in rows:
         domain=urlparse(row['website_hint']).hostname or ''

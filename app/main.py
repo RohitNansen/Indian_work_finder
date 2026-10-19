@@ -53,6 +53,8 @@ def startup():
     if settings.owner_password and hmac.compare_digest(settings.owner_password, settings.app_password):
         raise RuntimeError("OWNER_PASSWORD must differ from APP_PASSWORD")
     init_db()
+    from .company_memory import seed_career_sites
+    seed_career_sites()
     account=one("SELECT password_hash FROM candidate_account WHERE id=1")
     if not account or not check_password(settings.app_password,account["password_hash"]):
         write("INSERT INTO candidate_account(id,password_hash,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash,updated_at=excluded.updated_at",(password_hash(settings.app_password),utcnow()))
@@ -160,7 +162,7 @@ def home(request: Request):
         return response
     profile = one("SELECT * FROM profile WHERE id=1")
     resume = one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1")
-    latest = all_rows("SELECT r.*, (SELECT COUNT(DISTINCT sr.job_id) FROM search_results sr JOIN jobs j ON j.id=sr.job_id JOIN job_activity a ON a.job_id=sr.job_id WHERE sr.run_id=r.id AND j.direct_status='verified' AND j.verification_version=3 AND a.action IN ('listing_opened','application_link_opened')) AS opened_count, (SELECT COUNT(*) FROM search_results sr JOIN jobs j ON j.id=sr.job_id JOIN job_status st ON st.job_id=sr.job_id WHERE sr.run_id=r.id AND j.direct_status='verified' AND j.verification_version=3 AND st.status IN ('Applied','Interviewing','Offer','Rejected')) AS applied_count FROM search_runs r ORDER BY id DESC LIMIT 5")
+    latest = all_rows("SELECT r.*, (SELECT COUNT(DISTINCT sr.job_id) FROM search_results sr JOIN jobs j ON j.id=sr.job_id JOIN job_activity a ON a.job_id=sr.job_id WHERE sr.run_id=r.id AND j.direct_status='verified' AND j.verification_version>=3 AND a.action IN ('listing_opened','application_link_opened')) AS opened_count, (SELECT COUNT(*) FROM search_results sr JOIN jobs j ON j.id=sr.job_id JOIN job_status st ON st.job_id=sr.job_id WHERE sr.run_id=r.id AND j.direct_status='verified' AND j.verification_version>=3 AND st.status IN ('Applied','Interviewing','Offer','Rejected')) AS applied_count FROM search_runs r ORDER BY id DESC LIMIT 5")
     return page(request, "home.html", profile=profile, resume=resume, latest=latest,
                 default_roles=", ".join(DEFAULT_ROLES),
                 role_suggestions=list(dict.fromkeys(labels(profile["role_labels"]) + DEFAULT_ROLES))[:12],
@@ -175,7 +177,7 @@ def profile_page(request: Request):
                 resume=one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1"),
                 evidence=all_rows("SELECT section,employer,role,statement FROM resume_evidence "
                                   "WHERE resume_id=(SELECT MAX(id) FROM resumes) ORDER BY id"),
-                facts=all_rows("SELECT f.*,CASE WHEN j.direct_status='verified' AND j.verification_version=3 THEN j.title ELSE 'Previous job question' END AS job_title,CASE WHEN j.direct_status='verified' AND j.verification_version=3 THEN j.company ELSE '' END AS company FROM facts f LEFT JOIN jobs j ON j.id=f.source_job_id WHERE f.active=1 ORDER BY f.id DESC"),
+                facts=all_rows("SELECT f.*,CASE WHEN j.direct_status='verified' AND j.verification_version>=3 THEN j.title ELSE 'Previous job question' END AS job_title,CASE WHEN j.direct_status='verified' AND j.verification_version>=3 THEN j.company ELSE '' END AS company FROM facts f LEFT JOIN jobs j ON j.id=f.source_job_id WHERE f.active=1 ORDER BY f.id DESC"),
                 candidate_ready=bool(one("SELECT 1 FROM candidate_account WHERE id=1")))
 
 
@@ -239,14 +241,15 @@ async def search(request: Request, background: BackgroundTasks):
     args=dict(kind="manual",roles=str(form.get("roles",""))[:2000],
               keywords=str(form.get("keywords",""))[:2000],locations=str(form.get("locations",""))[:1000],
               work_types=str(form.get("work_types",""))[:500],
-              industries=str(form.get("industries",existing_industries))[:1000],count=count,days_recent=days)
+              industries=str(form.get("industries",existing_industries))[:1000],
+              focus_medical=str(form.get('focus_medical',''))=='1',count=count,days_recent=days)
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
         running=db.execute("SELECT id FROM search_runs WHERE status='running' ORDER BY id DESC LIMIT 1").fetchone()
         if running:
             return RedirectResponse(f"/runs/{running['id']}",status_code=303)
-        db.execute("UPDATE profile SET role_labels=?,keywords=?,locations=?,work_types=?,industry_preferences=?,updated_at=? WHERE id=1",
-                   (args['roles'],args['keywords'],args['locations'],args['work_types'],args['industries'],utcnow()))
+        db.execute("UPDATE profile SET role_labels=?,keywords=?,locations=?,work_types=?,industry_preferences=?,focus_medical=?,updated_at=? WHERE id=1",
+                   (args['roles'],args['keywords'],args['locations'],args['work_types'],args['industries'],int(args['focus_medical']),utcnow()))
         run_id=db.execute("INSERT INTO search_runs(kind,started_at,parameters_json) VALUES('manual',?,?)",
                           (utcnow(),json.dumps(args))).lastrowid
     def finish_search():
@@ -268,7 +271,7 @@ def results(request: Request, run_id: int):
     jobs = all_rows(
         "SELECT j.*,r.rank,r.why,r.seen_before,COALESCE(NULLIF(s.status,'New'),CASE WHEN EXISTS(SELECT 1 FROM job_activity a WHERE a.job_id=j.id AND a.action IN ('listing_opened','application_link_opened')) THEN 'Opened' ELSE 'Unopened' END) AS application_status FROM search_results r "
         "JOIN jobs j ON j.id=r.job_id LEFT JOIN job_status s ON s.job_id=j.id "
-        "WHERE r.run_id=? AND j.direct_status='verified' AND j.verification_version=3 ORDER BY r.rank",
+        "WHERE r.run_id=? AND j.direct_status='verified' AND j.verification_version>=3 ORDER BY r.rank",
         (run_id,),
     )
     progress=json.loads(run["progress_json"])
@@ -289,10 +292,10 @@ def job_page(request: Request, job_id: str):
               "WHERE job_id=? ORDER BY run_id DESC LIMIT 1",
               (job_id,))
     from .questions import ensure_questions
-    if job["direct_status"]=="verified" and job["verification_version"]==3:
+    if job["direct_status"]=="verified" and job["verification_version"]>=3:
         ensure_questions(dict(job))
     write("INSERT INTO job_activity(job_id,action,occurred_at) VALUES(?,?,?)", (job_id,"listing_opened",utcnow()))
-    questions = all_rows("SELECT * FROM questions WHERE job_id=? AND answered_at IS NULL ORDER BY id LIMIT 3", (job_id,)) if job["direct_status"]=="verified" and job["verification_version"]==3 else []
+    questions = all_rows("SELECT * FROM questions WHERE job_id=? AND answered_at IS NULL ORDER BY id LIMIT 3", (job_id,)) if job["direct_status"]=="verified" and job["verification_version"]>=3 else []
     answered = all_rows("SELECT * FROM questions WHERE job_id=? AND answered_at IS NOT NULL ORDER BY answered_at DESC", (job_id,))
     status = one("SELECT status FROM job_status WHERE job_id=?", (job_id,))
     variants = all_rows("SELECT * FROM resume_variants WHERE job_id=? ORDER BY id DESC", (job_id,))
@@ -399,7 +402,7 @@ def my_jobs(request: Request):
         "SELECT j.*,r.why,r.internal_score,sr.kind AS search_kind,"
         "sr.started_at AS recommended_at FROM search_results r "
         "JOIN jobs j ON j.id=r.job_id JOIN search_runs sr ON sr.id=r.run_id "
-        "WHERE j.direct_status='verified' AND j.verification_version=3 "
+        "WHERE j.direct_status='verified' AND j.verification_version>=3 "
         "AND r.run_id=(SELECT rr.run_id FROM search_results rr WHERE rr.job_id=j.id "
         "ORDER BY rr.internal_score DESC,rr.run_id DESC LIMIT 1) "
         "AND NOT EXISTS(SELECT 1 FROM job_activity a WHERE a.job_id=j.id "
@@ -556,10 +559,11 @@ def companies_page(request: Request):
         return response
     require_admin(request)
     return page(request, "companies.html", companies=all_rows(
-        "SELECT c.*,COUNT(o.id) AS listings_seen FROM companies c "
+        "SELECT c.*,COUNT(o.id) AS listings_seen,MAX(CASE WHEN o.source='Medical career directory' THEN 1 ELSE 0 END) AS in_medical_directory FROM companies c "
         "LEFT JOIN company_observations o ON o.company_id=c.id "
-        "GROUP BY c.id ORDER BY c.verified_at IS NULL,c.last_seen_at DESC,c.name LIMIT 500"),
+        "GROUP BY c.id ORDER BY in_medical_directory DESC,c.verified_at IS NULL,c.last_seen_at DESC,c.name LIMIT 500"),
         total=one("SELECT COUNT(*) AS n FROM companies")["n"],
+        medical_count=one("SELECT COUNT(DISTINCT company_id) AS n FROM company_observations WHERE source='Medical career directory'")["n"],
         lead_count=one("SELECT COUNT(*) AS n FROM source_leads WHERE provider='Apify Naukri'")["n"])
 
 
@@ -570,7 +574,7 @@ async def propose_variant(request: Request, job_id: str):
     resume = one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1")
     if not job or not resume:
         raise HTTPException(404, "Upload a resume first")
-    if job["direct_status"]!="verified" or job["verification_version"]!=3:
+    if job["direct_status"]!="verified" or job["verification_version"]<3:
         raise HTTPException(400,"Please verify the company vacancy before preparing a tailored resume.")
     answers = [dict(x) for x in all_rows("SELECT fact FROM facts WHERE active=1")]
     if not settings.openrouter_api_key:
