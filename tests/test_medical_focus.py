@@ -7,7 +7,7 @@ from test_workflow import sample_job
 
 
 def test_directory_is_large_unique_and_rotates(test_env):
-    assert len(MEDICAL_COMPANIES) >= 50
+    assert len(MEDICAL_COMPANIES) >= 100
     assert len({name.lower() for name, _, _ in MEDICAL_COMPANIES}) == len(MEDICAL_COMPANIES)
     assert all(url.startswith('https://') for _, url, _ in MEDICAL_COMPANIES)
     seed_career_sites()
