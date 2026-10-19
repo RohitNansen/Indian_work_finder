@@ -92,3 +92,26 @@ def test_focused_search_checks_medical_directory_before_other_sources(test_env, 
         object.__setattr__(settings, 'jsearch_api_key', original_key)
         object.__setattr__(settings, 'apify_token', original_apify)
         object.__setattr__(settings, 'openrouter_api_key', original_model)
+import json
+
+
+
+def test_bd_legal_employer_name_is_accepted_only_on_bd_vacancy(test_env, monkeypatch):
+    from app import direct_links
+    posting = {
+        '@type': 'JobPosting', 'title': 'Lead Design Engineer',
+        'hiringOrganization': {'name': 'Becton Dickinson & Company'},
+        'datePosted': db.utcnow(),
+        'description': 'Lead medical device design and validation, review quality systems, '
+                       'and coordinate multidisciplinary product development teams in Bengaluru.' * 2,
+        'jobLocation': {'address': {'addressLocality': 'Bengaluru',
+                                   'addressRegion': 'Karnataka', 'addressCountry': 'India'}},
+    }
+    html = '<script type="application/ld+json">' + json.dumps(posting) + '</script>'
+    monkeypatch.setattr(direct_links, 'read_page', lambda url: (url, html))
+    good = direct_links.cited_employer_vacancy('https://jobs.bd.com/en/job/bengaluru/123',
+                                                'BD', 'https://jobs.bd.com/en/', 30)
+    bad = direct_links.cited_employer_vacancy('https://other.example/job/123',
+                                               'BD', 'https://jobs.bd.com/en/', 30)
+    assert good and good['job_title'] == 'Lead Design Engineer'
+    assert bad is None

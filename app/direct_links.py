@@ -388,7 +388,10 @@ def cited_employer_vacancy(url, company, website, days, run_id=None):
         org_name=org.get('name','') if isinstance(org,dict) else str(org)
         description=BeautifulSoup(str(item.get('description') or ''),'html.parser').get_text('\n',strip=True)
         parent=parent_employer_match(final,company,org_name,description)
-        if org_name and not parent and not tokens(org_name)&tokens(company):
+        bd_legal_name=(company.strip().lower()=='bd' and
+                       {'becton','dickinson'} <= tokens(org_name) and
+                       host(final)=='jobs.bd.com')
+        if org_name and not parent and not bd_legal_name and not tokens(org_name)&tokens(company):
             raise ValueError('Posting belongs to another employer')
         if not parent and not employer_host(final,{'company':company,'company_url':website},org_name):
             raise ValueError('Employer ownership unconfirmed')

@@ -66,7 +66,7 @@ MEDICAL_COMPANIES = (
     ('Eli Lilly', 'https://careers.lilly.com/us/en', 'Pharmaceuticals'),
     ('AbbVie', 'https://careers.abbvie.com/en/', 'Pharmaceuticals'),
     ('Bristol Myers Squibb', 'https://careers.bms.com/global-pt/in/', 'Pharmaceuticals'),
-    ('IQVIA', 'https://jobs.iqvia.com/en/location/jobs/24443/1269750/2/1', 'Life sciences'),
+    ('IQVIA', 'https://jobs.iqvia.com/en/jobs', 'Life sciences'),
     ('Parexel', 'https://jobs.parexel.com/en/search-jobs/india/877/1/search-jobs', 'Life sciences'),
     ('ICON', 'https://careers.iconplc.com/jobs-in-india', 'Life sciences'),
 )
