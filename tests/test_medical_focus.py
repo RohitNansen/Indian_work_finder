@@ -17,7 +17,7 @@ def test_directory_is_large_unique_and_rotates(test_env):
         from app.company_memory import mark_company_scanned
         mark_company_scanned(company['id'])
     second = medical_company_sites(12)
-    assert not {x['id'] for x in first} & {x['id'] for x in second}
+    assert {x['name'] for x in first} & {x['name'] for x in second} == {'BD'}
 
 
 def test_free_crawler_emits_only_verified_same_host_vacancies(test_env, monkeypatch):

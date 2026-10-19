@@ -41,18 +41,24 @@ def seed_career_sites() -> None:
                        (company_id,'Medical career directory',url,name,url,now,now))
 
 
-def medical_company_sites(limit: int = 12) -> list[dict]:
-    """Rotate directory entries, including sites that yielded no jobs last time."""
+def medical_company_sites(limit: int = 24) -> list[dict]:
+    """Revisit a productive device employer and rotate the wider directory."""
     with connect() as db:
+        pinned = db.execute(
+            "SELECT c.id,c.name,c.website_hint,c.last_scanned_at FROM companies c "
+            "WHERE c.name_key='bd' AND c.website_hint IS NOT NULL AND EXISTS "
+            "(SELECT 1 FROM company_observations o WHERE o.company_id=c.id "
+            "AND o.source='Medical career directory')"
+        ).fetchone()
         rows = db.execute(
             "SELECT c.id,c.name,c.website_hint,c.last_scanned_at FROM companies c "
-            "WHERE c.website_hint IS NOT NULL AND EXISTS "
+            "WHERE c.name_key!='bd' AND c.website_hint IS NOT NULL AND EXISTS "
             "(SELECT 1 FROM company_observations o WHERE o.company_id=c.id "
             "AND o.source='Medical career directory') "
             "ORDER BY c.last_scanned_at IS NOT NULL,c.last_scanned_at,c.id LIMIT ?",
-            (limit,),
+            (max(0,limit-int(pinned is not None)),),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return ([dict(pinned)] if pinned and limit else []) + [dict(row) for row in rows]
 
 
 def name_key(name: str) -> str:
