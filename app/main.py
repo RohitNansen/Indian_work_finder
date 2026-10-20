@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import re
 import secrets
 import time
@@ -25,6 +26,7 @@ from .db import all_rows, connect, init_db, one, utcnow, write
 from .evidence import store_evidence
 from .resume import export_variant, extract_text, preflight_changes, prepare_layout_edits
 from .search import DEFAULT_ROLES, labels, normalized_link, run_search
+from .medical_directory import MEDICAL_COMPANIES, COMPANY_SIZE
 
 DEFAULT_KEYWORDS = ["Research and development", "Quality management", "Product development",
                     "Robotics", "Electronics", "Electrical engineering", "Textiles",
@@ -163,7 +165,9 @@ def home(request: Request):
     profile = one("SELECT * FROM profile WHERE id=1")
     resume = one("SELECT * FROM resumes ORDER BY id DESC LIMIT 1")
     latest = all_rows("SELECT r.*, (SELECT COUNT(DISTINCT sr.job_id) FROM search_results sr JOIN jobs j ON j.id=sr.job_id JOIN job_activity a ON a.job_id=sr.job_id WHERE sr.run_id=r.id AND j.direct_status='verified' AND j.verification_version>=3 AND a.action IN ('listing_opened','application_link_opened')) AS opened_count, (SELECT COUNT(*) FROM search_results sr JOIN jobs j ON j.id=sr.job_id JOIN job_status st ON st.job_id=sr.job_id WHERE sr.run_id=r.id AND j.direct_status='verified' AND j.verification_version>=3 AND st.status IN ('Applied','Interviewing','Offer','Rejected')) AS applied_count FROM search_runs r ORDER BY id DESC LIMIT 5")
+    medical_count=one("SELECT COUNT(DISTINCT company_id) AS n FROM company_observations WHERE source='Medical career directory'")["n"]
     return page(request, "home.html", profile=profile, resume=resume, latest=latest,
+                medical_count=medical_count, medical_estimate=max(10,math.ceil(medical_count/10)),
                 default_roles=", ".join(DEFAULT_ROLES),
                 role_suggestions=list(dict.fromkeys(labels(profile["role_labels"]) + DEFAULT_ROLES))[:12],
                 keyword_suggestions=list(dict.fromkeys(labels(profile["keywords"]) + DEFAULT_KEYWORDS))[:15])
@@ -276,7 +280,19 @@ def results(request: Request, run_id: int):
     )
     progress=json.loads(run["progress_json"])
     if run["status"]!="running":progress["matched"]=len(jobs)
+    previous=[]
+    if not jobs and run['status'] not in {'running','failed'}:
+        previous=all_rows(
+            "SELECT j.id,j.title,j.company,j.location FROM jobs j "
+            "WHERE j.direct_status='verified' AND j.verification_version>=3 "
+            "AND EXISTS(SELECT 1 FROM search_results r WHERE r.job_id=j.id) "
+            "AND NOT EXISTS(SELECT 1 FROM job_activity a WHERE a.job_id=j.id "
+            "AND a.action IN ('listing_opened','application_link_opened')) "
+            "AND NOT EXISTS(SELECT 1 FROM job_status s WHERE s.job_id=j.id "
+            "AND s.status IN ('Applied','Interviewing','Offer','Rejected','Closed')) "
+            "ORDER BY j.first_seen_at DESC LIMIT 2")
     return page(request, "results.html", run=run, jobs=jobs, progress=progress,
+                previous=previous,
                 new_count=sum(not job['seen_before'] for job in jobs),
                 requested_count=json.loads(run['parameters_json']).get('count',10))
 
@@ -565,6 +581,38 @@ def companies_page(request: Request):
         total=one("SELECT COUNT(*) AS n FROM companies")["n"],
         medical_count=one("SELECT COUNT(DISTINCT company_id) AS n FROM company_observations WHERE source='Medical career directory'")["n"],
         lead_count=one("SELECT COUNT(*) AS n FROM source_leads WHERE provider='Apify Naukri'")["n"])
+
+
+@app.get('/medical-companies', response_class=HTMLResponse)
+def medical_companies_page(request: Request):
+    if response := auth_or_redirect(request):
+        return response
+    fields={name: field for name,_,field in MEDICAL_COMPANIES}
+    rows=all_rows(
+        "SELECT c.id,c.name,c.website_hint,c.last_scanned_at,"
+        "(SELECT COUNT(*) FROM source_leads l WHERE l.provider='Employer career directory' "
+        "AND l.company=c.name) AS leads_seen "
+        "FROM companies c WHERE c.website_hint IS NOT NULL AND EXISTS "
+        "(SELECT 1 FROM company_observations o WHERE o.company_id=c.id "
+        "AND o.source='Medical career directory') ORDER BY c.name COLLATE NOCASE")
+    scans={}
+    for record in all_rows("SELECT request_json,error,completed_at FROM api_calls "
+                           "WHERE operation='scan_medical_career_page' ORDER BY id DESC LIMIT 5000"):
+        try:
+            url=json.loads(record['request_json'])['url']
+        except (ValueError,KeyError,TypeError):
+            continue
+        scans.setdefault(url,record)
+    companies=[]
+    for row in rows:
+        item=dict(row)
+        item['field']=fields.get(item['name'],'Medical / life sciences')
+        item['size'],item['size_source']=COMPANY_SIZE.get(item['name'],('Not confirmed',None))
+        last=scans.get(item['website_hint'])
+        item['scan_state']=('Not checked yet' if not last else
+                            'Could not read' if last['error'] else 'Checked')
+        companies.append(item)
+    return page(request,'medical_companies.html',companies=companies,total=len(companies))
 
 
 @app.post("/jobs/{job_id}/resume/propose")

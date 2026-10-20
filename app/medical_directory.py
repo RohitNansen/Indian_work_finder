@@ -176,4 +176,17 @@ MEDICAL_COMPANIES = (
     ('Cadila Pharmaceuticals', 'https://careers.cadilapharma.com/in/en', 'Pharmaceuticals'),
     ('L&T Technology Services', 'https://www.ltts.com/careers', 'Medical engineering'),
     ('Frontline Electro Medical', 'https://www.feml.in/careers.php', 'Medical devices'),
+    ('NephroPlus', 'https://nephroplus.com/careers/', 'Healthcare technology'),
+    ('Olympus', 'https://careers.olympusamerica.com/viewalljobs/?locale=en_US', 'Medical devices'),
+    ('Schiller Healthcare India', 'https://schillerindia.com/careers/', 'Medical devices'),
+    ('Sensa Core Medical Instrumentation', 'https://www.sensacore.com/careers', 'Diagnostics'),
+    ('Advanced Sterilization Products', 'https://careers.fortive.com/asp/', 'Medical devices'),
+    ('Getinge', 'https://careers.getinge.com/viewalljobs/', 'Medical devices'),
+    ('Dentsply Sirona', 'https://careers.dentsplysirona.com/', 'Medical devices'),
 )
+
+# Published by the employer on the linked careers page. Unknown figures stay
+# unreported rather than being inferred from a company's brand or age.
+COMPANY_SIZE = {
+    'Advanced Sterilization Products': ('1,700+ worldwide', 'https://careers.fortive.com/asp/'),
+}

@@ -41,8 +41,8 @@ def seed_career_sites() -> None:
                        (company_id,'Medical career directory',url,name,url,now,now))
 
 
-def medical_company_sites(limit: int = 24) -> list[dict]:
-    """Revisit a productive device employer and rotate the wider directory."""
+def medical_company_sites(limit: int | None = 24) -> list[dict]:
+    """Return the full directory when limit is None; rotate only bounded views."""
     with connect() as db:
         pinned = db.execute(
             "SELECT c.id,c.name,c.website_hint,c.last_scanned_at FROM companies c "
@@ -50,15 +50,18 @@ def medical_company_sites(limit: int = 24) -> list[dict]:
             "(SELECT 1 FROM company_observations o WHERE o.company_id=c.id "
             "AND o.source='Medical career directory')"
         ).fetchone()
-        rows = db.execute(
+        query = (
             "SELECT c.id,c.name,c.website_hint,c.last_scanned_at FROM companies c "
             "WHERE c.name_key!='bd' AND c.website_hint IS NOT NULL AND EXISTS "
             "(SELECT 1 FROM company_observations o WHERE o.company_id=c.id "
             "AND o.source='Medical career directory') "
-            "ORDER BY c.last_scanned_at IS NOT NULL,c.last_scanned_at,c.id DESC LIMIT ?",
-            (max(0,limit-int(pinned is not None)),),
-        ).fetchall()
-    return ([dict(pinned)] if pinned and limit else []) + [dict(row) for row in rows]
+            "ORDER BY c.last_scanned_at IS NOT NULL,c.last_scanned_at,c.id DESC"
+        )
+        if limit is None:
+            rows = db.execute(query).fetchall()
+        else:
+            rows = db.execute(query + " LIMIT ?", (max(0,limit-int(pinned is not None)),)).fetchall()
+    return ([dict(pinned)] if pinned and limit != 0 else []) + [dict(row) for row in rows]
 
 
 def name_key(name: str) -> str:
@@ -163,6 +166,32 @@ def remember_verified_vacancy(name: str, vacancy_url: str,
             "verified_at=? WHERE name_key=?",
             (website, career_page, vacancy_url, provider, board, utcnow(), key),
         )
+
+
+def add_verified_medical_employer(job: dict) -> bool:
+    """Grow the directory only from a verified medical vacancy and its named ATS board."""
+    subject = f"{job.get('company','')} {job.get('title','')}".lower()
+    description = (job.get('description') or '').lower()[:12000]
+    signal = re.compile(r'\b(?:medical|medtech|healthcare|healthtech|pharma|biotech|'
+                        r'diagnostic|life sciences?|biosciences?|surgical)\b')
+    if not signal.search(subject) or not signal.search(description):
+        return False
+    key = name_key(job.get('company',''))
+    with connect() as db:
+        row = db.execute("SELECT id,name,career_page FROM companies WHERE name_key=? "
+                         "AND verified_at IS NOT NULL AND ats_provider IN ('Lever','Greenhouse') "
+                         "AND career_page IS NOT NULL",(key,)).fetchone()
+        if not row or not safe_hint(row['career_page']):
+            return False
+        now=utcnow()
+        db.execute('UPDATE companies SET website_hint=? WHERE id=?',
+                   (row['career_page'],row['id']))
+        db.execute('INSERT OR IGNORE INTO company_observations('
+                   'company_id,source,source_job_key,observed_name,website_hint,first_seen_at,last_seen_at) '
+                   'VALUES(?,?,?,?,?,?,?)',
+                   (row['id'],'Medical career directory',row['career_page'],row['name'],
+                    row['career_page'],now,now))
+    return True
 
 
 def verified_company(name: str):

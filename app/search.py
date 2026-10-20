@@ -291,7 +291,8 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                                discover_employer_vacancies, discover_watched_company_vacancies)
     from .ats_feeds import discover_ats_vacancies
     from .company_memory import (watched_company_sites, candidate_company_sites,
-                                 medical_company_sites, seed_career_sites)
+                                 medical_company_sites, seed_career_sites,
+                                 add_verified_medical_employer)
     from .medical_crawl import crawl_medical_companies
     from .naukri import discover_naukri_vacancies
     from .employer_indexes import (discover_baxter_vacancies,
@@ -320,6 +321,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         "SELECT DISTINCT j.direct_url FROM search_results r JOIN jobs j ON j.id=r.job_id "
         "WHERE r.run_id<? AND j.direct_url IS NOT NULL",(run_id,))}
     started=time.monotonic();seen={};processed=set();selected=[];calls=0;web_calls=0;quota_limited=False;failures=0
+    time_limit_seconds=settings.search_time_limit_seconds
     context=profile_context();resume_evidence=current_evidence()
     def new_matches():
         return len(selected)
@@ -351,11 +353,12 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                                      -deterministic_score(j,roles_list,keywords_list,context)))
         verified=[]
         for job in available[:limit]:
-            if state['checked']>=settings.openrouter_max_jobs_per_run or time.monotonic()-started>settings.search_time_limit_seconds:break
+            if state['checked']>=settings.openrouter_max_jobs_per_run or time.monotonic()-started>time_limit_seconds:break
             processed.add(job['id']);state['checked']+=1
             progress('Checking company vacancies',job['title']+' · '+job['company'])
             resolved=resolve_job(job,force=job['id'] in previous_ids,run_id=run_id,web_discover=web_lookup)
             if resolved.get('direct_status')!='verified':continue
+            add_verified_medical_employer(resolved)
             if normalized_link(resolved.get('direct_url')) in previous_urls:continue
             evidence=json.loads(resolved.get('verified_json') or '{}')
             if not location_matches(resolved['location'],location_list,evidence.get('remote',False)):continue
@@ -391,22 +394,30 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         no_new=0
         scanned_medical_ids=set()
         if focus_medical:
-            medical_sites=medical_company_sites(len(MEDICAL_COMPANIES))
+            medical_sites=medical_company_sites(None)
+            # Let larger directories finish before the remaining sources run.
+            time_limit_seconds=max(time_limit_seconds,600+4*len(medical_sites))
             scanned_medical_ids={company['id'] for company in medical_sites}
+            state['medical_total']=len(medical_sites)
+            state['medical_checked']=0
             progress('Checking medical company career pages')
             def medical_progress(label):
                 if label.endswith('career pages)'):
                     state['queries'] += 1
+                    state['medical_checked'] += 1
                 progress('Checking medical company career pages',label)
             ingest(crawl_medical_companies(
                 medical_sites,days_recent,run_id,max_job_pages=36,roles=roles_list,
                 progress=medical_progress))
+            attempted=one("SELECT COUNT(*) AS n FROM api_calls WHERE run_id=? AND operation='scan_medical_career_page' AND completed_at IS NOT NULL",(run_id,))['n']
+            if attempted != len(medical_sites):
+                raise RuntimeError(f'Medical directory scan incomplete: {attempted}/{len(medical_sites)} career pages attempted')
         # Cover every entered role before vacancy resolution or rotating
         # employer lookups can use the shared web request allowance.
         groups=[roles_list[i:i+3] for i in range(0,len(roles_list),3)]
         for group in groups:
             if (web_calls>=max(0,settings.employer_web_lookups_per_run-5) or
-                    time.monotonic()-started>settings.search_time_limit_seconds):break
+                    time.monotonic()-started>time_limit_seconds):break
             web_calls+=1;state['queries']+=1
             progress('Searching company career pages',', '.join(group))
             ingest(discover_employer_vacancies(
@@ -438,7 +449,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             preferred=rotate(preferred);other=rotate(other)
             fallback=(preferred[:2]+other[:2]+preferred[2:]+other[2:])[:4]
             for company in fallback:
-                if (time.monotonic()-started>settings.search_time_limit_seconds or
+                if (time.monotonic()-started>time_limit_seconds or
                         web_calls>=settings.employer_web_lookups_per_run-6):break
                 web_calls+=1;state['queries']+=1
                 progress('Searching medical company vacancies',company['name'])
@@ -461,7 +472,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         # the same individual employer-vacancy verification.
         for company in candidate_company_sites(4)+watched_company_sites(3):
             if company['id'] in scanned_medical_ids:continue
-            if new_matches()>=count or time.monotonic()-started>settings.search_time_limit_seconds or web_calls>=settings.employer_web_lookups_per_run-2:break
+            if new_matches()>=count or time.monotonic()-started>time_limit_seconds or web_calls>=settings.employer_web_lookups_per_run-2:break
             web_calls+=1;state['queries']+=1
             progress('Checking saved company career pages',company['name'])
             ingest(discover_watched_company_vacancies(roles_list,location_list,days_recent,company,run_id))
@@ -480,13 +491,13 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             progress('Searching Naukri for preferred industries')
             ingest(discover_naukri_vacancies(roles_list,location_list,days_recent,run_id,industry_list))
             assess(8)
-            if new_matches()<count and time.monotonic()-started<settings.search_time_limit_seconds:
+            if new_matches()<count and time.monotonic()-started<time_limit_seconds:
                 state['queries']+=1
                 progress('Searching Naukri for transferable roles')
                 ingest(discover_naukri_vacancies(roles_list,location_list,days_recent,run_id,[],variant=1))
                 assess(6)
         while jsearch_ready and queue and calls<min(preferred_request_count,settings.jsearch_max_requests_per_run):
-            if time.monotonic()-started>settings.search_time_limit_seconds:
+            if time.monotonic()-started>time_limit_seconds:
                 state['stop_reason']='Search time limit reached';break
             if state['checked']>=settings.openrouter_max_jobs_per_run:
                 state['stop_reason']='Vacancy checking budget reached';break
@@ -503,7 +514,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         if state['checked']<settings.openrouter_max_jobs_per_run:assess(12)
         no_new=0
         while queue and not quota_limited and not state['stop_reason'] and calls<settings.jsearch_max_requests_per_run and new_matches()<count:
-            if time.monotonic()-started>settings.search_time_limit_seconds:state['stop_reason']='Search time limit reached';break
+            if time.monotonic()-started>time_limit_seconds:state['stop_reason']='Search time limit reached';break
             if state['checked']>=settings.openrouter_max_jobs_per_run:state['stop_reason']='Vacancy checking budget reached';break
             query,remote,cursor=queue.popleft();calls+=1;state['queries']+=1;progress('Searching related roles',query)
             try:rows,next_cursor=fetch_page(run_id,query,remote,cursor,days_recent)

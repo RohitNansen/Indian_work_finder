@@ -1,5 +1,5 @@
 from app import db, main, medical_crawl, search
-from app.company_memory import medical_company_sites, seed_career_sites
+from app.company_memory import medical_company_sites, seed_career_sites, add_verified_medical_employer
 from app.medical_directory import MEDICAL_COMPANIES
 from app.config import settings
 from conftest import csrf
@@ -7,7 +7,7 @@ from test_workflow import sample_job
 
 
 def test_directory_is_large_unique_and_rotates(test_env):
-    assert len(MEDICAL_COMPANIES) >= 168
+    assert len(MEDICAL_COMPANIES) >= 175
     assert len({name.lower() for name, _, _ in MEDICAL_COMPANIES}) == len(MEDICAL_COMPANIES)
     assert all(url.startswith('https://') for _, url, _ in MEDICAL_COMPANIES)
     seed_career_sites()
@@ -18,6 +18,32 @@ def test_directory_is_large_unique_and_rotates(test_env):
         mark_company_scanned(company['id'])
     second = medical_company_sites(12)
     assert {x['name'] for x in first} & {x['name'] for x in second} == {'BD'}
+    assert len(medical_company_sites(None)) == len(MEDICAL_COMPANIES)
+
+
+def test_medical_companies_page_is_public_to_candidate_and_uses_master_directory(client):
+    html=client.get('/medical-companies').text
+    assert 'Medical Companies' in html
+    assert 'Getinge' in html and 'https://careers.getinge.com/viewalljobs/' in html
+    assert 'Not confirmed' in html
+    assert 'Search medical companies first' in client.get('/').text
+    assert 'saved company career pages' in client.get('/').text
+
+
+def test_verified_medical_ats_employer_joins_complete_scan(test_env):
+    from app.company_memory import name_key
+    now=db.utcnow()
+    with db.connect() as conn:
+        conn.execute("INSERT INTO companies(name_key,name,website_hint,career_page,ats_provider,verified_at,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?)",
+                     (name_key('Example Medtech'),'Example Medtech','https://example.com/',
+                      'https://jobs.lever.co/examplemedtech','Lever',now,now,now))
+    assert add_verified_medical_employer({
+        'company':'Example Medtech','title':'Medical Device Quality Head',
+        'description':'Lead medical device quality management and validation.'})
+    assert any(row['name']=='Example Medtech' and row['website_hint']=='https://jobs.lever.co/examplemedtech'
+               for row in medical_company_sites(None))
+    assert not add_verified_medical_employer({
+        'company':'Example Medtech','title':'Finance Manager','description':'Manage budgets and revenue.'})
 
 
 def test_medical_focus_starts_on_but_can_be_switched_off(tmp_path):
@@ -126,7 +152,13 @@ def test_focused_search_checks_medical_directory_before_other_sources(test_env, 
     searched_roles = []
     monkeypatch.setattr(search, 'jsearch_has_capacity', lambda: False)
     monkeypatch.setattr(company_memory, 'medical_company_sites', lambda limit: [{'id': 1, 'name': 'Medical Lab', 'website_hint': 'https://example.com/careers'}])
-    monkeypatch.setattr(medical_crawl, 'crawl_medical_companies', lambda *args, **kwargs: (order.append('medical'), [])[1])
+    def fake_crawl(companies, _days, run_id, **_kwargs):
+        order.append('medical')
+        for company in companies:
+            db.write("INSERT INTO api_calls(run_id,provider,operation,request_json,started_at,completed_at) VALUES(?,'Employer website','scan_medical_career_page','{}',?,?)",
+                     (run_id,db.utcnow(),db.utcnow()))
+        return []
+    monkeypatch.setattr(medical_crawl, 'crawl_medical_companies', fake_crawl)
     monkeypatch.setattr(ats_feeds, 'discover_ats_vacancies', lambda *args: (order.append('boards'), [])[1])
     monkeypatch.setattr(employer_indexes, 'discover_baxter_vacancies', lambda *args: [])
     monkeypatch.setattr(employer_indexes, 'discover_radiometer_sitemap_vacancies', lambda *args: [])
