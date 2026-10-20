@@ -17,6 +17,7 @@ from .evidence import current_evidence, evidence_matches
 from .matching import normalize, words, role_variants, location_matches, recent, search_places
 from .company_memory import remember_raw
 from .industries import industry_priority, preferred_queries
+from .medical_directory import MEDICAL_COMPANIES
 
 DEFAULT_ROLES = [
     "R&D Director", "Research and Development Consultant", "Head of Quality",
@@ -391,12 +392,15 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         no_new=0
         scanned_medical_ids=set()
         if focus_medical:
-            medical_sites=medical_company_sites(24)
+            medical_sites=medical_company_sites(len(MEDICAL_COMPANIES))
             scanned_medical_ids={company['id'] for company in medical_sites}
             progress('Checking medical company career pages')
+            def medical_progress(label):
+                state['queries'] += 1
+                progress('Checking medical company career pages',label)
             ingest(crawl_medical_companies(
-                medical_sites,days_recent,run_id,max_job_pages=36,
-                progress=lambda label:progress('Checking medical company career pages',label)))
+                medical_sites,days_recent,run_id,max_job_pages=36,roles=roles_list,
+                progress=medical_progress))
             assess(14)
         progress('Checking employer job boards')
         ingest(discover_ats_vacancies(run_id))

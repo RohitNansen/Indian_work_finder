@@ -48,6 +48,35 @@ def test_free_crawler_emits_only_verified_same_host_vacancies(test_env, monkeypa
     assert db.one('SELECT last_scanned_at FROM companies WHERE id=?', (company['id'],))[0]
 
 
+def test_medical_scan_keeps_all_company_leads_and_rotates_detail_checks(test_env, monkeypatch):
+    companies = [
+        {'id': 11, 'name': 'Medical One', 'website_hint': 'https://one.example/careers'},
+        {'id': 12, 'name': 'Medical Two', 'website_hint': 'https://two.example/careers'},
+    ]
+    with db.connect() as conn:
+        for company in companies:
+            conn.execute('INSERT INTO companies(id,name_key,name,website_hint,first_seen_at,last_seen_at) '
+                         'VALUES(?,?,?,?,?,?)', (company['id'], company['name'].lower(),
+                         company['name'], company['website_hint'], db.utcnow(), db.utcnow()))
+    pages = {
+        companies[0]['website_hint']: '<a href="/jobs/head-quality">Head of Quality</a>',
+        companies[1]['website_hint']: '<a href="/jobs/rd-engineer">R&D Engineer</a>',
+    }
+    visited = []
+    monkeypatch.setattr(medical_crawl, 'read_page', lambda url: (url, pages[url]))
+    monkeypatch.setattr(medical_crawl, 'cited_employer_vacancy',
+                        lambda url, *_: (visited.append(url), {'job_title': url})[1])
+    run_id = db.write("INSERT INTO search_runs(kind,started_at,parameters_json) VALUES('manual',?,'{}')", (db.utcnow(),))
+    medical_crawl.crawl_medical_companies(companies, 30, run_id, max_job_pages=1,
+                                           roles=['Head of Quality'])
+    assert visited == ['https://one.example/jobs/head-quality']
+    assert db.one("SELECT COUNT(*) FROM source_leads WHERE provider='Employer career directory'")[0] == 2
+    assert db.one("SELECT COUNT(*) FROM api_calls WHERE operation='scan_medical_career_page'")[0] == 2
+    medical_crawl.crawl_medical_companies(companies, 30, run_id, max_job_pages=1,
+                                           roles=['Head of Quality'])
+    assert visited[-1] == 'https://two.example/jobs/rd-engineer'
+
+
 def test_medical_focus_is_saved_from_search_form(client, monkeypatch):
     original_key = settings.jsearch_api_key
     object.__setattr__(settings, 'jsearch_api_key', 'test-key')

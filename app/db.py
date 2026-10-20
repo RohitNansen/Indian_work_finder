@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS source_leads (
   company TEXT NOT NULL, title TEXT NOT NULL, location TEXT NOT NULL DEFAULT '',
   posted_at TEXT, source_url TEXT, raw_json TEXT NOT NULL,
   first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+  checked_at TEXT,
   PRIMARY KEY(provider,source_job_key)
 );
 CREATE TABLE IF NOT EXISTS search_results (
@@ -201,6 +202,9 @@ def init_db(path: Path | None = None) -> None:
                        "'Medical devices, Healthcare technology, Life sciences, Pharmaceuticals, Textile machinery'")
         if 'focus_medical' not in profile_columns:
             db.execute('ALTER TABLE profile ADD COLUMN focus_medical INTEGER NOT NULL DEFAULT 1')
+        lead_columns={row['name'] for row in db.execute('PRAGMA table_info(source_leads)')}
+        if 'checked_at' not in lead_columns:
+            db.execute('ALTER TABLE source_leads ADD COLUMN checked_at TEXT')
         company_columns={row['name'] for row in db.execute('PRAGMA table_info(companies)')}
         if 'last_scanned_at' not in company_columns:
             db.execute('ALTER TABLE companies ADD COLUMN last_scanned_at TEXT')
