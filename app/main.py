@@ -587,7 +587,8 @@ def companies_page(request: Request):
 def medical_companies_page(request: Request):
     if response := auth_or_redirect(request):
         return response
-    fields={name: field for name,_,field in MEDICAL_COMPANIES}
+    from .company_memory import name_key
+    fields={name_key(name): field for name,_,field in MEDICAL_COMPANIES}
     rows=all_rows(
         "SELECT c.id,c.name,c.website_hint,c.last_scanned_at,"
         "(SELECT COUNT(*) FROM source_leads l WHERE l.provider='Employer career directory' "
@@ -606,10 +607,10 @@ def medical_companies_page(request: Request):
     companies=[]
     for row in rows:
         item=dict(row)
-        item['field']=fields.get(item['name'],'Medical / life sciences')
+        item['field']=fields.get(name_key(item['name']),'Medical / life sciences')
         item['size'],item['size_source']=COMPANY_SIZE.get(item['name'],('Not confirmed',None))
         last=scans.get(item['website_hint'])
-        item['scan_state']=('Not checked yet' if not last else
+        item['scan_state']=('Checked previously' if item['last_scanned_at'] else 'Not checked yet') if not last else (
                             'Could not read' if last['error'] else 'Checked')
         companies.append(item)
     return page(request,'medical_companies.html',companies=companies,total=len(companies))

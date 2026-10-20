@@ -2,7 +2,7 @@
 {% block content %}
 <div class="hero"><p class="eyebrow">Company directory</p><h1>Medical Companies</h1><p class="muted">{{ total }} medical, life sciences, diagnostics and pharmaceutical employers. Explore their official career pages. A company on this list may have no suitable opening today; search results only show individually checked vacancies.</p></div>
 <section class="card">
- <label for="company-search">Find a company or field</label><input id="company-search" class="company-list-search" type="search" placeholder="For example, medical devices or Chennai" autocomplete="off">
+ <label for="company-search">Find a company or field</label><input id="company-search" class="company-list-search" type="search" placeholder="For example, medical devices or diagnostics" autocomplete="off">
  <p class="hint">The medical-focused search checks every career page in this list each time. A site that could not be read stays on the list for the next search.</p>
  <div class="scroll"><table class="company-table"><thead><tr><th>Company</th><th>Field</th><th>Career page</th><th>Company size</th><th>Last page check (IST)</th><th>Job leads seen</th></tr></thead><tbody>
  {% for company in companies %}<tr data-company-row><td><strong>{{ company.name }}</strong></td><td>{{ company.field }}</td><td><a href="{{ company.website_hint }}" target="_blank" rel="noopener noreferrer">Open career page ↗</a><small>{{ company.website_hint }}</small></td><td>{% if company.size_source %}<a href="{{ company.size_source }}" target="_blank" rel="noopener noreferrer">{{ company.size }}</a>{% else %}{{ company.size }}{% endif %}</td><td>{{ company.last_scanned_at|ist }}<small>{{ company.scan_state }}</small></td><td>{{ company.leads_seen }}</td></tr>{% endfor %}
