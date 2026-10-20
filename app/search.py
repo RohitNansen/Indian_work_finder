@@ -421,7 +421,8 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                                 "WHERE run_id=? AND operation='scan_medical_career_page'",(run_id,)):
                 try:outcomes[json.loads(row['request_json'])['company']]=row['response_count'] or 0
                 except (ValueError,KeyError,TypeError):continue
-            high_value=('Trivitron Healthcare','GE HealthCare','Siemens Healthineers',
+            high_value=('Appasamy Associates','Aurolab','Amcor',
+                        'Trivitron Healthcare','GE HealthCare','Siemens Healthineers',
                         'Philips','Medtronic','BPL Medical Technologies',
                         'Healthium Medtech','Skanray Technologies',
                         'Thermo Fisher Scientific','Boston Scientific')
