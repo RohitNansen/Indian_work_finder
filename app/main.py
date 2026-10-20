@@ -280,6 +280,9 @@ def results(request: Request, run_id: int):
     )
     progress=json.loads(run["progress_json"])
     if run["status"]!="running":progress["matched"]=len(jobs)
+    progress['medical_vacancies_checked']=one(
+        "SELECT COUNT(*) AS n FROM api_calls WHERE run_id=? AND operation='read_cited_vacancy'",
+        (run_id,))['n']
     previous=[]
     if not jobs and run['status'] not in {'running','failed'}:
         previous=all_rows(

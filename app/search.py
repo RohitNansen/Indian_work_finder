@@ -400,12 +400,17 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             scanned_medical_ids={company['id'] for company in medical_sites}
             state['medical_total']=len(medical_sites)
             state['medical_checked']=0
+            state['medical_vacancies_checked']=0
             progress('Checking medical company career pages')
             def medical_progress(label):
                 if label.endswith('career pages)'):
                     state['queries'] += 1
                     state['medical_checked'] += 1
-                progress('Checking medical company career pages',label)
+                if label.startswith('Reviewing ') and 'relevant vacancy pages)' in label:
+                    state['medical_vacancies_checked'] += 1
+                    progress('Checking medical vacancies',label)
+                else:
+                    progress('Checking medical company career pages',label)
             ingest(crawl_medical_companies(
                 medical_sites,days_recent,run_id,max_job_pages=len(medical_sites),roles=roles_list,
                 progress=medical_progress))

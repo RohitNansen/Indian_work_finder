@@ -153,9 +153,13 @@ def test_medical_focus_is_saved_from_search_form(client, monkeypatch):
 def test_version_four_verified_result_remains_visible(client):
     job = search.save_job(sample_job('Head of Quality', 'Medical Lab', 'version-4'))
     db.write("UPDATE jobs SET direct_status='verified',verification_version=4,direct_url=apply_url WHERE id=?", (job['id'],))
-    run_id = db.write("INSERT INTO search_runs(kind,started_at,parameters_json,status,progress_json) VALUES('manual',?,'{}','complete','{}')", (db.utcnow(),))
+    run_id = db.write("INSERT INTO search_runs(kind,started_at,parameters_json,status,progress_json) VALUES('manual',?,'{}','complete','{\"medical_total\":175,\"medical_checked\":175}')", (db.utcnow(),))
     db.write("INSERT INTO search_results(run_id,job_id,rank,internal_score) VALUES(?,?,1,80)", (run_id,job['id']))
-    assert 'Head of Quality' in client.get(f'/runs/{run_id}').text
+    db.write("INSERT INTO api_calls(run_id,provider,operation,request_json,started_at,completed_at) VALUES(?,'Employer website','read_cited_vacancy','{}',?,?)",
+             (run_id,db.utcnow(),db.utcnow()))
+    page=client.get(f'/runs/{run_id}').text
+    assert 'Head of Quality' in page
+    assert 'Medical vacancy pages' in page and '175/175' in page
 
 
 def test_focused_search_checks_medical_directory_before_other_sources(test_env, monkeypatch):
