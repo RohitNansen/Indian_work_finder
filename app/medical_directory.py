@@ -2,7 +2,7 @@
 
 These are company discovery pages, not proof of an open India vacancy.  Each
 individual job must pass the existing employer-page and location verifier.
-The directory rotates across searches so a single run never crawls it all.
+The focused search checks every entry on each run, within its time limit.
 """
 
 # Company, official careers URL, field.  URLs were checked against official
@@ -150,4 +150,18 @@ MEDICAL_COMPANIES = (
     ('Micro Labs', 'https://www.microlabsltd.com/careers/', 'Pharmaceuticals'),
     ('Vimta Labs', 'https://vimta.com/', 'Life sciences'),
     ('Hetero Healthcare', 'https://www.heterohealthcare.com/careers/divisions', 'Pharmaceuticals'),
+    ('Amcor', 'https://www.amcor.com/careers', 'Medical packaging'),
+    ('Bioplus Life Sciences', 'https://bioplus.in/careers', 'Life sciences'),
+    ('Amneal Pharmaceuticals India', 'https://india.amneal.com/careers/', 'Pharmaceuticals'),
+    ('Regeneron', 'https://careers.regeneron.com/en/locations/asia/india/', 'Life sciences'),
+    ('Quantum Biosciences', 'https://quantumbiosciences.ai/careers/', 'Diagnostics'),
+    ('Healthcare Technology Innovation Centre', 'https://www.hticiitm.org/engineers', 'Medical devices'),
+    ('Medox Biotech India', 'https://www.medoxbio.com/careers/', 'Life sciences'),
+    ('Sanotis Pharma', 'https://sanotispharma.com/careers.html', 'Pharmaceuticals'),
+    ('Sahrang Medtech', 'https://sahrangmedtech.systems/careers.html', 'Medical devices'),
+    ('C-CAMP', 'https://ccamp.res.in/careers', 'Life sciences'),
+    ('Sami-Sabinsa Group', 'https://careers.sami-sabinsagroup.com/', 'Life sciences'),
+    ('Leucine', 'https://leucine.ai/careers/', 'Pharmaceutical technology'),
+    ('Aureole Pharma Tech', 'https://www.aureolepharmatech.com/careers/', 'Pharmaceutical equipment'),
+    ('Ashirvad Industries', 'https://ashirvadindustries.in/careers/', 'Pharmaceutical equipment'),
 )

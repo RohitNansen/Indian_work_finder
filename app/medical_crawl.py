@@ -16,7 +16,9 @@ ROLE_WORDS = re.compile(r'\b(?:research|r&d|quality|engineering|hardware|electri
                         r'automation|robotics|product|design|innovation|technical|regulatory|'
                         r'validation|medical|manufacturing|director|head|consultant|'
                         r'biomedical|instrumentation|firmware|compliance|operations|qms|qa|qc)\b', re.I)
-JOB_PATH = re.compile(r'/(?:job|jobs|position|positions|vacanc(?:y|ies))/', re.I)
+JOB_PATH = re.compile(r'/(?:job|jobs|position|positions|vacanc(?:y|ies)|career|careers)/', re.I)
+UNRELATED_TITLE = re.compile(r'\b(?:sales|marketing|commercial|finance|procurement|intern|'
+                             r'trainee|recruitment|accounting|customer success)\b', re.I)
 
 
 def _links(page_url: str, html: str) -> list[tuple[str, str]]:
@@ -30,14 +32,17 @@ def _links(page_url: str, html: str) -> list[tuple[str, str]]:
         title = a.get_text(' ', strip=True) or a.get('aria-label', '') or a.get('title', '')
         if not ROLE_WORDS.search(title) and a.parent:
             title = a.parent.get_text(' ', strip=True)[:240]
+        is_ats_vacancy = (under(target_host, ATS) and
+                          len([part for part in parsed.path.split('/') if part]) >= 2)
         if (parsed.scheme != 'https' or
                 (target_host != host and not under(target_host, ATS)) or
-                url == page_url or not JOB_PATH.search(parsed.path + '/') or
+                url == page_url or not (JOB_PATH.search(parsed.path + '/') or is_ats_vacancy) or
                 not ROLE_WORDS.search(title)):
             continue
         # An index path such as /jobs/ is not an individual vacancy.
         tail = parsed.path.rstrip('/').split('/')[-1]
-        if tail.lower() in {'job', 'jobs', 'position', 'positions', 'vacancy', 'vacancies'}:
+        if tail.lower() in {'job', 'jobs', 'position', 'positions', 'vacancy', 'vacancies',
+                            'career', 'careers'}:
             continue
         if not any(saved_url == url for saved_url, _ in found):
             found.append((url, title[:300]))
@@ -97,8 +102,19 @@ def crawl_medical_companies(companies: list[dict], days: int, run_id: int,
                 mark_company_scanned(company['id'])
                 if progress:
                     progress(f"{company['name']} ({index}/{len(companies)} career pages)")
-    checked = {row['source_job_key']: row['checked_at'] for row in all_rows(
-        "SELECT source_job_key,checked_at FROM source_leads WHERE provider='Employer career directory'")}
+    checked = {}
+    current_urls = {item[0] for item in candidates}
+    company_names = {company['name'] for company in companies}
+    for row in all_rows("SELECT source_job_key,title,company,raw_json,checked_at "
+                        "FROM source_leads WHERE provider='Employer career directory'"):
+        checked[row['source_job_key']] = row['checked_at']
+        if row['company'] not in company_names or row['source_job_key'] in current_urls:
+            continue
+        try:
+            career_url = json.loads(row['raw_json']).get('careerUrl') or ''
+        except (ValueError, TypeError):
+            career_url = ''
+        candidates.append((row['source_job_key'], row['title'], row['company'], career_url))
     candidates.sort(key=lambda item: (
         checked.get(item[0]) is not None,
         -int(_role_strength(item[1], roles or []) > 0),
@@ -106,12 +122,14 @@ def crawl_medical_companies(companies: list[dict], days: int, run_id: int,
         checked.get(item[0]) or '',
     ))
     seen_urls = set()
-    for vacancy_url, _title, company_name, career_url in candidates:
+    for vacancy_url, title, company_name, career_url in candidates:
         if len(seen_urls) >= max_job_pages:
             break
-        if vacancy_url in seen_urls:
+        if vacancy_url in seen_urls or UNRELATED_TITLE.search(title):
             continue
         seen_urls.add(vacancy_url)
+        if progress:
+            progress(f"Reviewing {title[:80]} ({len(seen_urls)}/{max_job_pages} vacancy pages)")
         job = cited_employer_vacancy(vacancy_url, company_name, career_url, days, run_id)
         write("UPDATE source_leads SET checked_at=? WHERE provider='Employer career directory' "
               "AND source_job_key=?", (utcnow(), vacancy_url))

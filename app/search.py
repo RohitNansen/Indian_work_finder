@@ -325,9 +325,8 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
         return len(selected)
     def web_lookup(job):
         nonlocal web_calls
-        # Reserve most employer searches for rotating career sites, rather
-        # than spending the whole allowance resolving weak aggregator leads.
-        if web_calls>=max(0,settings.employer_web_lookups_per_run-9):return []
+        # Preserve web lookups for role coverage and rotating company sites.
+        if web_calls>=max(0,settings.employer_web_lookups_per_run-13):return []
         web_calls+=1;state['queries']+=1
         return find_employer_on_web(job,run_id)
     def ingest(rows):
@@ -396,12 +395,55 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             scanned_medical_ids={company['id'] for company in medical_sites}
             progress('Checking medical company career pages')
             def medical_progress(label):
-                state['queries'] += 1
+                if label.endswith('career pages)'):
+                    state['queries'] += 1
                 progress('Checking medical company career pages',label)
             ingest(crawl_medical_companies(
                 medical_sites,days_recent,run_id,max_job_pages=36,roles=roles_list,
                 progress=medical_progress))
-            assess(14)
+        # Cover every entered role before vacancy resolution or rotating
+        # employer lookups can use the shared web request allowance.
+        groups=[roles_list[i:i+3] for i in range(0,len(roles_list),3)]
+        for group in groups:
+            if (web_calls>=max(0,settings.employer_web_lookups_per_run-5) or
+                    time.monotonic()-started>settings.search_time_limit_seconds):break
+            web_calls+=1;state['queries']+=1
+            progress('Searching company career pages',', '.join(group))
+            ingest(discover_employer_vacancies(
+                group,location_list,days_recent,run_id,keywords_list))
+        assess(14)
+        if focus_medical:
+            # Some official pages render jobs only in JavaScript or refuse a
+            # direct read. Search a rotating few of those sites by domain, then
+            # subject any vacancy found to the same employer-page verifier.
+            outcomes={}
+            for row in all_rows("SELECT request_json,response_count FROM api_calls "
+                                "WHERE run_id=? AND operation='scan_medical_career_page'",(run_id,)):
+                try:outcomes[json.loads(row['request_json'])['company']]=row['response_count'] or 0
+                except (ValueError,KeyError,TypeError):continue
+            high_value=('Trivitron Healthcare','GE HealthCare','Siemens Healthineers',
+                        'Philips','Medtronic','BPL Medical Technologies',
+                        'Healthium Medtech','Skanray Technologies',
+                        'Thermo Fisher Scientific','Boston Scientific')
+            blocked=[company for company in medical_sites
+                     if company['name'] in outcomes and outcomes[company['name']]==0]
+            preferred=sorted((company for company in blocked if company['name'] in high_value),
+                             key=lambda company:high_value.index(company['name']))
+            other=[company for company in blocked if company['name'] not in high_value]
+            def rotate(companies):
+                if not companies:return []
+                pivot=((run_id-1)*2)%len(companies)
+                return companies[pivot:]+companies[:pivot]
+            preferred=rotate(preferred);other=rotate(other)
+            fallback=(preferred[:2]+other[:2]+preferred[2:]+other[2:])[:4]
+            for company in fallback:
+                if (time.monotonic()-started>settings.search_time_limit_seconds or
+                        web_calls>=settings.employer_web_lookups_per_run-6):break
+                web_calls+=1;state['queries']+=1
+                progress('Searching medical company vacancies',company['name'])
+                ingest(discover_watched_company_vacancies(
+                    roles_list,location_list,days_recent,company,run_id))
+                assess(6)
         progress('Checking employer job boards')
         ingest(discover_ats_vacancies(run_id))
         assess(6)
@@ -457,13 +499,6 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
             added=ingest(rows);no_new=0 if added else no_new+1
             if calls%2==0:assess(10)
         if state['checked']<settings.openrouter_max_jobs_per_run:assess(10)
-        # A small direct-career search complements the aggregator with different sources.
-        groups=[roles_list[i:i+2] for i in range(0,len(roles_list),2)]
-        for group in groups:
-            if not group or new_matches()>=count or web_calls>=max(0,settings.employer_web_lookups_per_run-2) or time.monotonic()-started>settings.search_time_limit_seconds:break
-            web_calls+=1;state['queries']+=1;progress('Searching company career pages',', '.join(group))
-            ingest(discover_employer_vacancies(group,location_list,days_recent,run_id,keywords_list))
-            if new_matches()>=count:break
         if state['checked']<settings.openrouter_max_jobs_per_run:assess(12)
         no_new=0
         while queue and not quota_limited and not state['stop_reason'] and calls<settings.jsearch_max_requests_per_run and new_matches()<count:

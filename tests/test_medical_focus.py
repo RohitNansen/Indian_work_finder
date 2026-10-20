@@ -7,7 +7,7 @@ from test_workflow import sample_job
 
 
 def test_directory_is_large_unique_and_rotates(test_env):
-    assert len(MEDICAL_COMPANIES) >= 100
+    assert len(MEDICAL_COMPANIES) >= 155
     assert len({name.lower() for name, _, _ in MEDICAL_COMPANIES}) == len(MEDICAL_COMPANIES)
     assert all(url.startswith('https://') for _, url, _ in MEDICAL_COMPANIES)
     seed_career_sites()
@@ -48,6 +48,14 @@ def test_free_crawler_emits_only_verified_same_host_vacancies(test_env, monkeypa
     assert db.one('SELECT last_scanned_at FROM companies WHERE id=?', (company['id'],))[0]
 
 
+def test_crawler_recognizes_employer_ats_vacancies_without_job_path():
+    links = medical_crawl._links('https://jobs.lever.co/dozee',
+        '<a href="/dozee/ce1319b0-dbcb-4847-b3eb-da75d11755ab">Hardware Lead</a>'
+        '<a href="https://www.naukri.com/jobs/123">Hardware Lead</a>')
+    assert links == [('https://jobs.lever.co/dozee/ce1319b0-dbcb-4847-b3eb-da75d11755ab',
+                      'Hardware Lead')]
+
+
 def test_medical_scan_keeps_all_company_leads_and_rotates_detail_checks(test_env, monkeypatch):
     companies = [
         {'id': 11, 'name': 'Medical One', 'website_hint': 'https://one.example/careers'},
@@ -72,6 +80,8 @@ def test_medical_scan_keeps_all_company_leads_and_rotates_detail_checks(test_env
     assert visited == ['https://one.example/jobs/head-quality']
     assert db.one("SELECT COUNT(*) FROM source_leads WHERE provider='Employer career directory'")[0] == 2
     assert db.one("SELECT COUNT(*) FROM api_calls WHERE operation='scan_medical_career_page'")[0] == 2
+    monkeypatch.setattr(medical_crawl, 'read_page',
+                        lambda url: (_ for _ in ()).throw(ValueError('Career page temporarily blocked')))
     medical_crawl.crawl_medical_companies(companies, 30, run_id, max_job_pages=1,
                                            roles=['Head of Quality'])
     assert visited[-1] == 'https://two.example/jobs/rd-engineer'
@@ -113,6 +123,7 @@ def test_focused_search_checks_medical_directory_before_other_sources(test_env, 
     object.__setattr__(settings, 'apify_token', '')
     object.__setattr__(settings, 'openrouter_api_key', '')
     order = []
+    searched_roles = []
     monkeypatch.setattr(search, 'jsearch_has_capacity', lambda: False)
     monkeypatch.setattr(company_memory, 'medical_company_sites', lambda limit: [{'id': 1, 'name': 'Medical Lab', 'website_hint': 'https://example.com/careers'}])
     monkeypatch.setattr(medical_crawl, 'crawl_medical_companies', lambda *args, **kwargs: (order.append('medical'), [])[1])
@@ -121,12 +132,15 @@ def test_focused_search_checks_medical_directory_before_other_sources(test_env, 
     monkeypatch.setattr(employer_indexes, 'discover_radiometer_sitemap_vacancies', lambda *args: [])
     monkeypatch.setattr(company_memory, 'candidate_company_sites', lambda limit: [])
     monkeypatch.setattr(company_memory, 'watched_company_sites', lambda limit: [])
-    monkeypatch.setattr(direct_links, 'discover_employer_vacancies', lambda *args: [])
+    monkeypatch.setattr(direct_links, 'discover_employer_vacancies',
+                        lambda roles, *_: (searched_roles.extend(roles), [])[1])
     try:
-        run_id = search.run_search(kind='manual', roles='Head of Quality', keywords='',
+        roles = 'Head of Quality,Technical Advisor,R&D Director,Product Development Lead'
+        run_id = search.run_search(kind='manual', roles=roles, keywords='',
                                    locations='Chennai', work_types='Full-time', count=1,
                                    focus_medical=True)
         assert order[:2] == ['medical', 'boards']
+        assert searched_roles[:4] == search.labels(roles)
         assert db.one('SELECT status FROM search_runs WHERE id=?', (run_id,))[0] in {'complete', 'partial_quota'}
     finally:
         object.__setattr__(settings, 'jsearch_api_key', original_key)
