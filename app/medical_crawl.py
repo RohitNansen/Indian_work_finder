@@ -121,15 +121,18 @@ def crawl_medical_companies(companies: list[dict], days: int, run_id: int,
         -_role_strength(item[1], roles or []),
         checked.get(item[0]) or '',
     ))
+    candidates=[item for item in candidates if not UNRELATED_TITLE.search(item[1]) and
+                (not roles or _role_strength(item[1],roles)>0)]
+    review_limit=min(max_job_pages,len({item[0] for item in candidates}))
     seen_urls = set()
     for vacancy_url, title, company_name, career_url in candidates:
-        if len(seen_urls) >= max_job_pages:
+        if len(seen_urls) >= review_limit:
             break
         if vacancy_url in seen_urls or UNRELATED_TITLE.search(title):
             continue
         seen_urls.add(vacancy_url)
         if progress:
-            progress(f"Reviewing {title[:80]} ({len(seen_urls)}/{max_job_pages} vacancy pages)")
+            progress(f"Reviewing {title[:80]} ({len(seen_urls)}/{review_limit} relevant vacancy pages)")
         job = cited_employer_vacancy(vacancy_url, company_name, career_url, days, run_id)
         write("UPDATE source_leads SET checked_at=? WHERE provider='Employer career directory' "
               "AND source_job_key=?", (utcnow(), vacancy_url))

@@ -407,7 +407,7 @@ def run_search(*, kind: str, roles: str, keywords: str, locations: str,
                     state['medical_checked'] += 1
                 progress('Checking medical company career pages',label)
             ingest(crawl_medical_companies(
-                medical_sites,days_recent,run_id,max_job_pages=36,roles=roles_list,
+                medical_sites,days_recent,run_id,max_job_pages=len(medical_sites),roles=roles_list,
                 progress=medical_progress))
             attempted=one("SELECT COUNT(*) AS n FROM api_calls WHERE run_id=? AND operation='scan_medical_career_page' AND completed_at IS NOT NULL",(run_id,))['n']
             if attempted != len(medical_sites):

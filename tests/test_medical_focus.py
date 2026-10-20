@@ -102,15 +102,33 @@ def test_medical_scan_keeps_all_company_leads_and_rotates_detail_checks(test_env
                         lambda url, *_: (visited.append(url), {'job_title': url})[1])
     run_id = db.write("INSERT INTO search_runs(kind,started_at,parameters_json) VALUES('manual',?,'{}')", (db.utcnow(),))
     medical_crawl.crawl_medical_companies(companies, 30, run_id, max_job_pages=1,
-                                           roles=['Head of Quality'])
+                                           roles=['Head of Quality','R&D Director'])
     assert visited == ['https://one.example/jobs/head-quality']
     assert db.one("SELECT COUNT(*) FROM source_leads WHERE provider='Employer career directory'")[0] == 2
     assert db.one("SELECT COUNT(*) FROM api_calls WHERE operation='scan_medical_career_page'")[0] == 2
     monkeypatch.setattr(medical_crawl, 'read_page',
                         lambda url: (_ for _ in ()).throw(ValueError('Career page temporarily blocked')))
     medical_crawl.crawl_medical_companies(companies, 30, run_id, max_job_pages=1,
-                                           roles=['Head of Quality'])
+                                           roles=['Head of Quality','R&D Director'])
     assert visited[-1] == 'https://two.example/jobs/rd-engineer'
+
+
+def test_medical_scan_reviews_all_role_relevant_leads(test_env, monkeypatch):
+    company={'id':21,'name':'Medical Three','website_hint':'https://three.example/careers'}
+    with db.connect() as conn:
+        conn.execute('INSERT INTO companies(id,name_key,name,website_hint,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?)',
+                     (21,'medical three',company['name'],company['website_hint'],db.utcnow(),db.utcnow()))
+    html=('<a href="/jobs/head-quality">Head of Quality</a>'
+          '<a href="/jobs/hardware-lead">Hardware Engineering Lead</a>'
+          '<a href="/jobs/sales-lead">Sales Engineering Lead</a>')
+    monkeypatch.setattr(medical_crawl,'read_page',lambda url:(url,html))
+    checked=[]
+    monkeypatch.setattr(medical_crawl,'cited_employer_vacancy',
+                        lambda url,*args:(checked.append(url),{'job_title':url})[1])
+    run_id=db.write("INSERT INTO search_runs(kind,started_at,parameters_json) VALUES('manual',?,'{}')",(db.utcnow(),))
+    medical_crawl.crawl_medical_companies([company],30,run_id,max_job_pages=3,
+                                          roles=['Head of Quality','Hardware Engineering Head'])
+    assert {url.rsplit('/',1)[-1] for url in checked}=={'head-quality','hardware-lead'}
 
 
 def test_medical_focus_is_saved_from_search_form(client, monkeypatch):
